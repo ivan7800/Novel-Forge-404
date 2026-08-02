@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Novel Forge 404",
   "short_name": "Novel Forge",
-  "description": "Editor local de novelas en español con tarjetas, cronología, pistas, continuidad, comentarios, copias seguras y exportación EPUB/DOCX.",
+  "description": "Editor local de novelas en español con tarjetas, cronología, pistas, continuidad, comentarios, copias seguras y versión estable con centro de exportación DOCX, EPUB, PDF, HTML, Markdown, TXT y ZIP.",
   "lang": "es-ES",
   "dir": "ltr",
   "start_url": "./",

@@ -1,29 +1,34 @@
-# Seguridad
+# Seguridad — Novel Forge 404
 
-## Modelo
+## Modelo de seguridad
 
-Novel Forge 404 es una aplicación estática, local y sin backend. No incluye dependencias JavaScript de producción, autenticación ni sincronización remota.
+La aplicación es estática y no dispone de backend. El contenido permanece en el navegador y no se ejecutan servicios remotos.
 
-Medidas incorporadas:
+## Controles aplicados
 
-- CSP restrictiva y recursos del mismo origen.
-- Saneamiento del HTML del editor y de proyectos importados.
-- Saneamiento y límites para pistas, continuidad y comentarios.
-- Límites de tamaño y descompresión para archivos importados.
-- Validación de ZIP/DOCX contra cifrado, rutas peligrosas y expansión excesiva.
-- Exportación EPUB construida únicamente desde HTML saneado.
-- Confirmación de operaciones destructivas.
-- Sin evaluación dinámica de código ni scripts importados.
-- Acceso a carpetas únicamente tras autorización explícita del navegador.
+- Política de seguridad de contenido en `index.html`.
+- Recursos limitados al mismo origen.
+- Saneamiento de HTML pegado o importado.
+- Eliminación de scripts, eventos, SVG, MathML, formularios, iframes y objetos incrustados.
+- Límites de tamaño para archivos importados y contenido descomprimido.
+- Rechazo de rutas ZIP con `..`, absolutas o inseguras.
+- Rechazo de ZIP cifrados.
+- Lectura EPUB basada en `container.xml`, OPF, manifiesto y spine.
+- Exportaciones DOCX, EPUB y ZIP generadas sin contenido ejecutable.
+- Nombres de archivo saneados.
+- Enlaces y rutas relativos para GitHub Pages.
 
-## Consideraciones
+## Limitaciones
 
-- Una persona con acceso al perfil del navegador puede leer los proyectos locales.
-- `.novel404`, DOCX y EPUB no están cifrados.
-- Las carpetas vinculadas deben estar en una ubicación protegida por el usuario.
-- La comparación de versiones y los detectores narrativos son herramientas auxiliares, no validaciones semánticas infalibles.
-- La CSP permite estilos inline para personalización local, pero no scripts inline en la versión publicada.
+- Novel Forge no puede recuperar una copia cifrada o protegida por DRM.
+- La seguridad de la carpeta vinculada depende de los permisos concedidos por el navegador.
+- Un dispositivo comprometido puede acceder a datos locales igual que a otros archivos del usuario.
+- La aplicación no sustituye una estrategia externa de copias de seguridad.
 
-## Comunicación de vulnerabilidades
+## Publicación segura
 
-No publiques manuscritos ni copias privadas en informes públicos. Utiliza un proyecto de prueba y describe los pasos mínimos de reproducción.
+Publica siempre mediante HTTPS. GitHub Pages proporciona HTTPS, necesario para PWA, almacenamiento persistente y acceso a carpetas en navegadores compatibles.
+
+## Reporte de problemas
+
+No incluyas manuscritos privados ni datos personales en un informe público. Describe el problema, navegador, versión y pasos de reproducción con un proyecto de prueba.

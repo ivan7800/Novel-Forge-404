@@ -1,4 +1,4 @@
-const CACHE_NAME = 'novel-forge-404-v1.2.0';
+const CACHE_NAME = 'novel-forge-404-v1.4.0';
 const ROOT_URL = new URL('./', self.registration.scope).href;
 const INDEX_URL = new URL('index.html', self.registration.scope).href;
 const APP_SHELL = [
