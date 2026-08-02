@@ -55,6 +55,9 @@
     draggedScene: null,
     saveTimer: null,
     saveChain: Promise.resolve(),
+    saveRevision: 0,
+    persistedRevision: 0,
+    savedEditorRange: null,
     sessionStartWords: 0,
     speech: null,
     storageMode: 'indexeddb',
@@ -75,23 +78,29 @@
 
   const els = {};
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', () => { void init(); });
 
   async function init() {
-    cacheElements();
-    bindEvents();
-    await loadState();
-    await loadFolderHandle();
-    registerServiceWorker();
-    applyPreferences();
-    ensureActiveSelection();
-    renderAll();
-    state.sessionStartWords = projectWordCount(activeProject());
-    updateSessionWords();
-    updateStorageStatus();
-    updateFolderStatus();
-    startAutoBackups();
-    checkBackupReminder();
+    try {
+      cacheElements();
+      bindEvents();
+      await loadState();
+      await loadFolderHandle();
+      registerServiceWorker();
+      applyPreferences();
+      ensureActiveSelection();
+      renderAll();
+      state.sessionStartWords = projectWordCount(activeProject());
+      updateSessionWords();
+      updateStorageStatus();
+      updateFolderStatus();
+      startAutoBackups();
+      checkBackupReminder();
+      document.documentElement.dataset.appReady = 'true';
+    } catch (error) {
+      console.error('Novel Forge no pudo iniciarse:', error);
+      showFatalStartupError(error);
+    }
   }
 
   function cacheElements() {
@@ -162,6 +171,10 @@
 
   function bindEvents() {
     document.addEventListener('click', handleGlobalClick);
+    document.addEventListener('selectionchange', rememberEditorSelection);
+    document.querySelector('.editor-toolbar')?.addEventListener('pointerdown', event => {
+      if (event.target.closest('button')) event.preventDefault();
+    });
     els.projectSelect.addEventListener('change', () => switchProject(els.projectSelect.value));
     els.editor.addEventListener('input', () => {
       const scene = activeScene();
@@ -201,7 +214,6 @@
     els.splitSceneTitle?.addEventListener('input', saveSplitTitle);
     els.fileInput.addEventListener('change', handleFiles);
     els.dialog.addEventListener('close', restoreDialogFocus);
-    window.addEventListener('beforeunload', flushSave);
     window.addEventListener('pagehide', flushSave);
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') closePanels();
@@ -223,7 +235,7 @@
 
     if (commandButton) {
       event.preventDefault();
-      els.editor.focus();
+      restoreEditorSelection();
       document.execCommand(commandButton.dataset.command, false);
       return;
     }
@@ -1242,14 +1254,14 @@
   }
 
   function insertAtCursor(text) {
-    els.editor.focus();
+    restoreEditorSelection();
     if (text === '⁂') document.execCommand('insertHTML', false, '<hr><p><br></p>');
     else document.execCommand('insertText', false, text);
     els.editor.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   function surroundSelection(open, close) {
-    els.editor.focus();
+    restoreEditorSelection();
     const selection = window.getSelection();
     const selected = selection?.toString() || '';
     document.execCommand('insertText', false, `${open}${selected}${close}`);
@@ -1681,8 +1693,8 @@
     body.className = 'option-grid';
     const actions = [
       ['Nueva novela', 'Crea otro proyecto independiente.', showNewProjectDialog],
-      ['Importar', 'Pega texto o importa TXT, Markdown, DOCX y copias.', showImportDialog],
-      ['Exportar', 'Genera EPUB, DOCX, Markdown, TXT o una copia completa.', showExportDialog],
+      ['Importar', 'Pega texto o importa TXT, Markdown, DOCX, EPUB y copias.', showImportDialog],
+      ['Exportar', 'Abre el centro de exportación profesional.', showExportDialog],
       ['Carpeta y copia', 'Vincula una carpeta o guarda una copia directa.', showFolderDialog],
       ['Datos del proyecto', 'Edita título, autor, objetivo e instantáneas.', showProjectInfoDialog],
       ['Ajustes', 'Tema, papel, tipografía y almacenamiento.', showSettingsDialog],
@@ -1705,6 +1717,7 @@
     const choices = [
       ['Archivo TXT o Markdown', 'Importa texto y puede dividirlo por capítulos.', () => chooseFiles('.txt,.md,.markdown')],
       ['Documento DOCX', 'Extrae títulos, párrafos, cursivas y negritas básicas.', () => chooseFiles('.docx')],
+      ['Libro EPUB', 'Recupera capítulos y formato básico de un EPUB sin DRM.', () => chooseFiles('.epub')],
       ['Proyecto Novel 404', 'Restaura una copia .novel404 o .json.', () => chooseFiles('.novel404,.json')],
       ['Pegar manuscrito', 'Pega un texto largo y decide cómo dividirlo.', showPasteManuscriptDialog]
     ];
@@ -1758,6 +1771,9 @@
           importTextManuscript(text, { split: true, newProject: false, sourceName: file.name });
         } else if (extension === 'docx') {
           const sections = await extractDocxManuscript(await file.arrayBuffer(), file.name);
+          importStructuredManuscript(sections, { newProject: false, sourceName: file.name });
+        } else if (extension === 'epub') {
+          const sections = await extractEpubManuscript(await file.arrayBuffer(), file.name);
           importStructuredManuscript(sections, { newProject: false, sourceName: file.name });
         } else if (['json','novel404'].includes(extension)) {
           const data = JSON.parse(await file.text());
@@ -1820,8 +1836,8 @@
 
   function importProjectBackup(data, sourceName) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('La copia no contiene un proyecto válido');
-    if (data.format && data.format !== 'novel-forge-404') throw new Error('El formato de copia no es compatible');
-    const projectData = data.format === 'novel-forge-404' ? data.project : data.project || data;
+    if (data.format && !['novel-forge-404','novel-forge-interchange'].includes(data.format)) throw new Error('El formato de copia no es compatible');
+    const projectData = ['novel-forge-404','novel-forge-interchange'].includes(data.format) ? data.project : data.project || data;
     if (!projectData || typeof projectData !== 'object') throw new Error('No se ha encontrado el proyecto en la copia');
     const project = rekeyProject(migrateProject(projectData));
     project.title = `${project.title} (importado)`;
@@ -1908,58 +1924,437 @@
   }
 
   function showExportDialog() {
+    flushEditorToState();
+    const project = activeProject();
     const wrapper = document.createElement('div');
-    wrapper.innerHTML = `<div class="option-grid" id="exportOptions">
-      <button type="button" class="option-card" data-export-format="epub"><strong>EPUB 3</strong><span>Libro electrónico con portada tipográfica, índice navegable y capítulos.</span></button>
-      <button type="button" class="option-card" data-export-format="docx"><strong>DOCX editorial</strong><span>Documento Word con portada, capítulos, estilos y sangría real.</span></button>
-      <button type="button" class="option-card" data-export-format="markdown"><strong>Markdown</strong><span>Un archivo limpio con títulos, metadatos opcionales y texto.</span></button>
-      <button type="button" class="option-card" data-export-format="txt"><strong>TXT UTF-8</strong><span>Texto plano compatible con cualquier editor.</span></button>
-      <button type="button" class="option-card" data-export-format="backup"><strong>Copia completa</strong><span>Proyecto .novel404 con estructura, fichas, notas y papelera.</span></button>
-    </div>`;
-    openDialog('Exportar novela', wrapper, [dialogButton('Cerrar', closeDialog, 'ghost')]);
-    $$('[data-export-format]', wrapper).forEach(button => button.addEventListener('click', async () => {
-      const format = button.dataset.exportFormat;
-      closeDialog();
-      await exportProject(format);
-    }));
+    wrapper.className = 'export-studio';
+    wrapper.innerHTML = `<div class="export-hero">
+      <div><strong>Centro de exportación</strong><span>Genera la novela completa, una selección o documentos de trabajo sin perder el proyecto original.</span></div>
+      <span class="export-version">v1.3</span>
+    </div>
+    <div class="export-grid">
+      <fieldset>
+        <legend>Archivo</legend>
+        <label>Formato<select id="exportFormat">
+          <option value="docx">DOCX · Microsoft Word</option>
+          <option value="epub">EPUB 3 · Libro electrónico</option>
+          <option value="pdf">PDF · Imprimir o guardar</option>
+          <option value="html">HTML · Documento autónomo</option>
+          <option value="markdown">Markdown</option>
+          <option value="txt">TXT UTF-8</option>
+          <option value="package">Paquete ZIP interoperable</option>
+          <option value="backup">Copia completa .novel404</option>
+          <option value="json">JSON abierto</option>
+        </select></label>
+        <label id="exportProfileLabel">Perfil editorial<select id="exportProfile">
+          <option value="editorial">Manuscrito editorial · A4, doble espacio</option>
+          <option value="print-a5">Novela impresa · A5</option>
+          <option value="kdp-6x9">KDP impreso · 6 × 9 pulgadas</option>
+          <option value="digital">Lectura digital · A4 cómoda</option>
+          <option value="correction">Corrección · amplio y sin sangría</option>
+          <option value="beta">Lector beta · identificado</option>
+        </select></label>
+      </fieldset>
+      <fieldset>
+        <legend>Contenido</legend>
+        <label>Documento<select id="exportContent">
+          <option value="manuscript">Manuscrito</option>
+          <option value="beta">Copia para lector beta</option>
+          <option value="dialogue">Solo diálogos</option>
+          <option value="narration">Solo narración</option>
+          <option value="timeline">Cronología</option>
+          <option value="bible">Biblia de la novela</option>
+          <option value="clues">Pistas y revelaciones</option>
+          <option value="continuity">Continuidad</option>
+          <option value="comments">Comentarios de revisión</option>
+          <option value="statistics">Informe de estadísticas</option>
+          <option value="dossier">Dossier narrativo completo</option>
+        </select></label>
+        <label>Alcance<select id="exportScope">
+          <option value="all">Novela completa</option>
+          <option value="current-chapter">Capítulo actual</option>
+          <option value="current-scene">Escena actual</option>
+          <option value="act">Un acto</option>
+          <option value="pov">Un POV</option>
+          <option value="character">Un personaje</option>
+          <option value="selected">Escenas seleccionadas</option>
+        </select></label>
+        <div id="exportScopeTarget" class="export-scope-target"></div>
+      </fieldset>
+    </div>
+    <fieldset>
+      <legend>Opciones</legend>
+      <div class="export-options">
+        <label class="checkbox-line"><input id="exportCover" type="checkbox" checked> Portada y datos editoriales</label>
+        <label class="checkbox-line"><input id="exportToc" type="checkbox" checked> Índice de capítulos</label>
+        <label class="checkbox-line"><input id="exportSceneTitles" type="checkbox"> Mostrar títulos de escena</label>
+        <label class="checkbox-line"><input id="exportMetadata" type="checkbox"> Incluir POV, lugar, fecha, hora y acto</label>
+        <label class="checkbox-line"><input id="exportNotes" type="checkbox"> Incluir notas privadas</label>
+        <label class="checkbox-line"><input id="exportComments" type="checkbox"> Incluir comentarios abiertos</label>
+      </div>
+      <div class="export-beta-options" id="exportBetaOptions" hidden>
+        <label>Identificación del lector<input id="exportReader" maxlength="160" placeholder="Nombre o código del lector"></label>
+        <label>Preguntas al final de cada capítulo<textarea id="exportQuestions" rows="4">¿Qué te ha resultado confuso?\n¿Qué crees que ocurrirá después?\n¿Qué emoción predomina?\n¿Qué cambiarías o ampliarías?</textarea></label>
+      </div>
+    </fieldset>
+    <div id="exportPreview" class="export-preview" aria-live="polite"></div>`;
+
+    els.dialog.classList.add('dialog-wide');
+    els.dialog.addEventListener('close', () => els.dialog.classList.remove('dialog-wide'), { once: true });
+
+    const renderScopeTarget = () => {
+      const scope = $('#exportScope', wrapper).value;
+      const target = $('#exportScopeTarget', wrapper);
+      const contexts = flattenScenes(project);
+      const unique = values => [...new Set(values.map(value => safeString(value, 240).trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+      if (scope === 'act') {
+        const acts = unique(contexts.map(item => item.scene.meta.act));
+        target.innerHTML = acts.length
+          ? `<label>Acto<select id="exportScopeValue">${acts.map(value => `<option>${escapeHtml(value)}</option>`).join('')}</select></label>`
+          : '<p class="dialog-help">No hay actos definidos en las escenas.</p>';
+      } else if (scope === 'pov') {
+        const povs = unique(contexts.map(item => item.scene.meta.pov));
+        target.innerHTML = povs.length
+          ? `<label>POV<select id="exportScopeValue">${povs.map(value => `<option>${escapeHtml(value)}</option>`).join('')}</select></label>`
+          : '<p class="dialog-help">No hay POV definidos en las escenas.</p>';
+      } else if (scope === 'character') {
+        const characters = exportCharacterNames(project);
+        target.innerHTML = characters.length
+          ? `<label>Personaje<select id="exportScopeValue">${characters.map(value => `<option>${escapeHtml(value)}</option>`).join('')}</select></label>`
+          : '<label>Personaje<input id="exportScopeValue" maxlength="240" placeholder="Nombre exacto"></label>';
+      } else if (scope === 'selected') {
+        target.innerHTML = `<div class="export-scenes" role="group" aria-label="Escenas que se exportarán">${project.chapters.map(chapter => `<section><strong>${escapeHtml(chapter.title)}</strong>${chapter.scenes.map(scene => `<label class="checkbox-line"><input type="checkbox" data-export-scene value="${escapeAttr(scene.id)}" ${scene.id === state.activeSceneId ? 'checked' : ''}> ${escapeHtml(scene.title)} <small>${formatNumber(countWords(htmlToText(scene.html)))} palabras</small></label>`).join('')}</section>`).join('')}</div>`;
+      } else {
+        target.replaceChildren();
+      }
+      target.querySelectorAll('input,select').forEach(control => control.addEventListener('change', updatePreview));
+      updatePreview();
+    };
+
+    const collectOptions = () => ({
+      format: $('#exportFormat', wrapper).value,
+      content: $('#exportContent', wrapper).value,
+      scope: $('#exportScope', wrapper).value,
+      scopeValue: $('#exportScopeValue', wrapper)?.value?.trim() || '',
+      selectedSceneIds: $$('[data-export-scene]:checked', wrapper).map(input => input.value),
+      profile: $('#exportProfile', wrapper).value,
+      includeCover: $('#exportCover', wrapper).checked,
+      includeToc: $('#exportToc', wrapper).checked,
+      includeSceneTitles: $('#exportSceneTitles', wrapper).checked,
+      includeMetadata: $('#exportMetadata', wrapper).checked,
+      includeNotes: $('#exportNotes', wrapper).checked,
+      includeComments: $('#exportComments', wrapper).checked,
+      reader: $('#exportReader', wrapper)?.value?.trim() || '',
+      questions: ($('#exportQuestions', wrapper)?.value || '').split(/\n+/).map(value => value.trim()).filter(Boolean)
+    });
+
+    function updatePreview() {
+      const options = collectOptions();
+      const reportContent = ['bible','clues','continuity','comments','dossier'].includes(options.content);
+      const fullProjectFormat = ['backup','json'].includes(options.format);
+      $('#exportContent', wrapper).disabled = fullProjectFormat;
+      $('#exportScope', wrapper).disabled = reportContent || fullProjectFormat;
+      if (reportContent || fullProjectFormat) options.scope = 'all';
+      if (fullProjectFormat) options.content = 'manuscript';
+      const profileVisible = ['docx','pdf','html'].includes(options.format);
+      $('#exportProfileLabel', wrapper).hidden = !profileVisible;
+      const beta = !fullProjectFormat && (options.content === 'beta' || options.profile === 'beta');
+      $('#exportBetaOptions', wrapper).hidden = !beta;
+      const contexts = resolveExportContexts(project, options);
+      const words = contexts.reduce((sum, item) => sum + countWords(htmlToText(item.scene.html)), 0);
+      const formatLabel = $('#exportFormat', wrapper).selectedOptions[0]?.textContent || options.format;
+      const contentLabel = fullProjectFormat ? 'Proyecto completo' : ($('#exportContent', wrapper).selectedOptions[0]?.textContent || options.content);
+      $('#exportPreview', wrapper).innerHTML = `<strong>${escapeHtml(contentLabel)}</strong><span>${contexts.length} escena${contexts.length === 1 ? '' : 's'} · ${formatNumber(words)} palabras de manuscrito · ${escapeHtml(formatLabel)}</span>${fullProjectFormat ? '<small>Este formato incluye siempre el proyecto completo, aunque haya otro alcance seleccionado.</small>' : ''}${options.format === 'pdf' ? '<small>Se abrirá el cuadro de impresión; elige “Guardar como PDF”.</small>' : ''}${options.content === 'dialogue' || options.content === 'narration' ? '<small>La separación se basa en párrafos que empiezan por raya y en comillas tipográficas.</small>' : ''}`;
+    }
+
+    ['exportFormat','exportContent','exportScope','exportProfile','exportCover','exportToc','exportSceneTitles','exportMetadata','exportNotes','exportComments']
+      .forEach(id => $(`#${id}`, wrapper).addEventListener('change', event => {
+        if (id === 'exportScope') renderScopeTarget();
+        else updatePreview();
+      }));
+
+    openDialog('Exportar novela', wrapper, [
+      dialogButton('Cancelar', closeDialog, 'ghost'),
+      dialogButton('Generar exportación', async () => {
+        const options = collectOptions();
+        if (['bible','clues','continuity','comments','dossier'].includes(options.content)) options.scope = 'all';
+        const contexts = resolveExportContexts(project, options);
+        if (!contexts.length && ['manuscript','beta','dialogue','narration','timeline','statistics'].includes(options.content)) {
+          return toast('El alcance elegido no contiene escenas.');
+        }
+        closeDialog();
+        await exportProject(options);
+      }, 'primary')
+    ]);
+    renderScopeTarget();
+    updatePreview();
   }
 
-  async function exportProject(format) {
+  function exportCharacterNames(project) {
+    const names = [];
+    flattenScenes(project).forEach(({ scene }) => {
+      if (scene.meta.pov) names.push(scene.meta.pov);
+      names.push(...String(scene.meta.participants || '').split(/[,;\n]/));
+    });
+    (project.bible || []).filter(entry => /personaje/i.test(entry.type)).forEach(entry => names.push(entry.name));
+    const seen = new Map();
+    names.map(value => safeString(value, 240).trim()).filter(Boolean).forEach(value => {
+      const key = value.toLocaleLowerCase('es');
+      if (!seen.has(key)) seen.set(key, value);
+    });
+    return [...seen.values()].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }
+
+  function resolveExportContexts(project, options = {}) {
+    const contexts = flattenScenes(project);
+    const scope = options.scope || 'all';
+    const value = safeString(options.scopeValue, 240).trim().toLocaleLowerCase('es');
+    if (scope === 'current-chapter') return contexts.filter(item => item.chapter.id === state.activeChapterId);
+    if (scope === 'current-scene') return contexts.filter(item => item.scene.id === state.activeSceneId);
+    if (scope === 'act') return contexts.filter(item => String(item.scene.meta.act || '').trim().toLocaleLowerCase('es') === value);
+    if (scope === 'pov') return contexts.filter(item => String(item.scene.meta.pov || '').trim().toLocaleLowerCase('es') === value);
+    if (scope === 'character') return contexts.filter(item => {
+      const explicit = [item.scene.meta.pov, ...String(item.scene.meta.participants || '').split(/[,;\n]/)]
+        .map(name => String(name || '').trim().toLocaleLowerCase('es'));
+      return explicit.includes(value);
+    });
+    if (scope === 'selected') {
+      const selected = new Set(options.selectedSceneIds || []);
+      return contexts.filter(item => selected.has(item.scene.id));
+    }
+    return contexts;
+  }
+
+  async function exportProject(options = {}) {
     flushSave();
-    const project = activeProject();
-    const base = safeFilename(project.title || 'novela');
+    const original = activeProject();
+    const base = safeFilename(original.title || 'novela');
+    const suffix = exportFilenameSuffix(options);
     try {
-      if (format === 'txt') {
-        downloadBlob(new Blob([buildPlainText(project)], { type: 'text/plain;charset=utf-8' }), `${base}.txt`);
-      } else if (format === 'markdown') {
-        downloadBlob(new Blob([buildMarkdown(project)], { type: 'text/markdown;charset=utf-8' }), `${base}.md`);
-      } else if (format === 'backup') {
-        project.lastBackupAt = nowIso();
-        const backup = { format: 'novel-forge-404', version: 3, exportedAt: project.lastBackupAt, project };
+      if (options.format === 'backup') {
+        original.lastBackupAt = nowIso();
+        const backup = { format: 'novel-forge-404', version: 4, exportedAt: original.lastBackupAt, project: structuredCloneSafe(original) };
         downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' }), `${base}.novel404`);
         await persistImmediately();
-      } else if (format === 'docx') {
-        const blob = await buildDocx(project);
-        downloadBlob(blob, `${base}.docx`);
-      } else if (format === 'epub') {
-        const blob = await buildEpub(project);
-        downloadBlob(blob, `${base}.epub`);
+      } else if (options.format === 'json') {
+        const payload = { format: 'novel-forge-interchange', version: 1, exportedAt: nowIso(), project: structuredCloneSafe(original) };
+        downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }), `${base}.json`);
+      } else if (options.format === 'package') {
+        const blob = await buildInterchangePackage(original, options);
+        downloadBlob(blob, `${base}-${suffix}.zip`);
+      } else {
+        const exportProjectData = prepareExportProject(original, options);
+        if (options.format === 'txt') {
+          downloadBlob(new Blob([buildPlainText(exportProjectData, options)], { type: 'text/plain;charset=utf-8' }), `${base}-${suffix}.txt`);
+        } else if (options.format === 'markdown') {
+          downloadBlob(new Blob([buildMarkdown(exportProjectData, options)], { type: 'text/markdown;charset=utf-8' }), `${base}-${suffix}.md`);
+        } else if (options.format === 'html') {
+          downloadBlob(new Blob([buildHtmlDocument(exportProjectData, options)], { type: 'text/html;charset=utf-8' }), `${base}-${suffix}.html`);
+        } else if (options.format === 'pdf') {
+          printExportDocument(exportProjectData, options);
+        } else if (options.format === 'docx') {
+          const blob = await buildDocx(exportProjectData, options);
+          downloadBlob(blob, `${base}-${suffix}.docx`);
+        } else if (options.format === 'epub') {
+          const blob = await buildEpub(exportProjectData, options);
+          downloadBlob(blob, `${base}-${suffix}.epub`);
+        }
       }
-      toast(`Exportación ${format.toUpperCase()} preparada.`);
+      toast(options.format === 'pdf' ? 'Documento preparado para imprimir o guardar como PDF.' : `Exportación ${String(options.format).toUpperCase()} preparada.`);
     } catch (error) {
       console.error(error);
       toast(`Error al exportar: ${error.message}`);
     }
   }
 
-  function buildPlainText(project) {
+  function exportFilenameSuffix(options = {}) {
+    const labels = {
+      manuscript: 'manuscrito', beta: 'lector-beta', dialogue: 'dialogos', narration: 'narracion', timeline: 'cronologia',
+      bible: 'biblia', clues: 'pistas', continuity: 'continuidad', comments: 'comentarios', statistics: 'estadisticas', dossier: 'dossier'
+    };
+    const scope = options.scope === 'all' || !options.scope ? '' : `-${safeFilename(options.scopeValue || options.scope)}`;
+    return `${labels[options.content] || 'exportacion'}${scope}`;
+  }
+
+  function prepareExportProject(project, options = {}) {
+    const contexts = resolveExportContexts(project, options);
+    const base = {
+      ...structuredCloneSafe(project),
+      title: project.title,
+      subtitle: project.subtitle,
+      author: project.author,
+      chapters: []
+    };
+    const content = options.content || 'manuscript';
+    if (['bible','clues','continuity','comments','statistics','dossier'].includes(content)) {
+      return buildReportProject(project, options, contexts);
+    }
+    if (content === 'timeline') return buildTimelineProject(project, options, contexts);
+
+    const chapterMap = new Map();
+    contexts.forEach(context => {
+      if (!chapterMap.has(context.chapter.id)) {
+        const chapter = { id: context.chapter.id, title: context.chapter.title, notes: context.chapter.notes, scenes: [] };
+        chapterMap.set(context.chapter.id, chapter);
+        base.chapters.push(chapter);
+      }
+      const scene = structuredCloneSafe(context.scene);
+      if (content === 'dialogue') scene.html = extractDialogueHtml(scene.html);
+      else if (content === 'narration') scene.html = extractNarrationHtml(scene.html);
+      scene.html = decorateExportScene(scene, project, options);
+      chapterMap.get(context.chapter.id).scenes.push(scene);
+    });
+
+    if (content === 'beta') {
+      base.subtitle = [base.subtitle, options.reader ? `Copia para ${options.reader}` : 'Copia para lector beta'].filter(Boolean).join(' · ');
+      const questions = options.questions?.length ? options.questions : ['¿Qué te ha resultado confuso?', '¿Qué crees que ocurrirá después?', '¿Qué emoción predomina?'];
+      base.chapters.forEach(chapter => chapter.scenes.push({
+        id: uid('export-question'),
+        title: 'Preguntas para lector beta',
+        html: `<h2>Preguntas para lector beta</h2>${questions.map(question => `<p>□ ${escapeHtml(question)}</p><p><br></p>`).join('')}`,
+        meta: emptyMeta(), createdAt: nowIso(), updatedAt: nowIso()
+      }));
+    }
+    return base;
+  }
+
+  function decorateExportScene(scene, project, options) {
+    const parts = [];
+    if (options.includeSceneTitles) parts.push(`<h2>${escapeHtml(scene.title)}</h2>`);
+    if (options.includeMetadata) {
+      const meta = scene.meta || {};
+      const values = [meta.pov && `POV: ${meta.pov}`, meta.place && `Lugar: ${meta.place}`, meta.date && `Fecha: ${meta.date}`, meta.time && `Hora: ${meta.time}`, meta.act && `Acto: ${meta.act}`].filter(Boolean);
+      if (values.length) parts.push(`<p><em>${escapeHtml(values.join(' · '))}</em></p>`);
+    }
+    parts.push(sanitizeEditorHtml(scene.html || '<p></p>'));
+    if (options.includeNotes && scene.meta?.notes) parts.push(`<hr><h3>Notas privadas</h3>${plainTextToHtml(scene.meta.notes)}`);
+    if (options.includeComments) {
+      const comments = (project.comments || []).filter(comment => comment.sceneId === scene.id && !comment.resolved);
+      if (comments.length) parts.push(`<hr><h3>Comentarios pendientes</h3>${comments.map(comment => `<p><strong>${escapeHtml(comment.type)}:</strong> ${escapeHtml(comment.note)}${comment.excerpt ? `<br><em>“${escapeHtml(comment.excerpt)}”</em>` : ''}</p>`).join('')}`);
+    }
+    return sanitizeEditorHtml(parts.join(''));
+  }
+
+  function extractDialogueHtml(html) {
+    const container = document.createElement('div');
+    container.innerHTML = sanitizeEditorHtml(html);
+    const output = [];
+    [...container.querySelectorAll('p,div,h1,h2,h3')].forEach(block => {
+      const text = block.textContent.trim();
+      if (!text) return;
+      if (/^—/.test(text)) output.push(`<p>${escapeHtml(text)}</p>`);
+      else {
+        const matches = [...text.matchAll(/«([^»]+)»|“([^”]+)”|"([^"]+)"/g)];
+        matches.forEach(match => output.push(`<p>«${escapeHtml(match[1] || match[2] || match[3] || '')}»</p>`));
+      }
+    });
+    return output.join('') || '<p><em>No se han detectado diálogos en esta escena.</em></p>';
+  }
+
+  function extractNarrationHtml(html) {
+    const container = document.createElement('div');
+    container.innerHTML = sanitizeEditorHtml(html);
+    const output = [];
+    [...container.childNodes].forEach(node => {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'HR') { output.push('<hr>'); return; }
+      const text = (node.textContent || '').trim();
+      if (!text || /^—/.test(text)) return;
+      const withoutQuotes = text.replace(/«[^»]+»|“[^”]+”|"[^"]+"/g, '').replace(/\s{2,}/g, ' ').trim();
+      if (withoutQuotes) output.push(`<p>${escapeHtml(withoutQuotes)}</p>`);
+    });
+    return output.join('') || '<p><em>No se ha detectado narración fuera de los párrafos de diálogo.</em></p>';
+  }
+
+  function buildTimelineProject(project, options, contexts) {
+    const sorted = contexts.slice().sort((a, b) => {
+      const at = timelineTimestamp(a.scene); const bt = timelineTimestamp(b.scene);
+      if (at === null && bt === null) return a.order - b.order;
+      if (at === null) return 1; if (bt === null) return -1;
+      return at - bt || a.order - b.order;
+    });
+    return {
+      ...structuredCloneSafe(project),
+      title: `${project.title} — Cronología`,
+      subtitle: 'Orden temporal de escenas',
+      chapters: [{ id: uid('report'), title: 'Cronología', notes: '', scenes: sorted.map(({ chapter, scene }) => ({
+        id: uid('timeline'), title: `${chapter.title} · ${scene.title}`,
+        html: `<h2>${escapeHtml(chapter.title)} · ${escapeHtml(scene.title)}</h2><p><strong>${escapeHtml(scene.meta.date || 'Fecha sin definir')}${scene.meta.time ? ` · ${escapeHtml(scene.meta.time)}` : ''}</strong></p><p>${escapeHtml([scene.meta.place, scene.meta.pov && `POV: ${scene.meta.pov}`].filter(Boolean).join(' · ') || 'Lugar y POV sin definir')}</p>${plainTextToHtml(scene.meta.summary || htmlToText(scene.html).slice(0, 500) || 'Escena sin resumen.')}`,
+        meta: structuredCloneSafe(scene.meta), createdAt: scene.createdAt, updatedAt: scene.updatedAt
+      })) }]
+    };
+  }
+
+  function buildReportProject(project, options, contexts = flattenScenes(project)) {
+    const content = options.content || 'dossier';
+    const reports = [];
+    if (content === 'dossier') reports.push(...buildTimelineProject(project, options, contexts).chapters);
+    if (content === 'bible' || content === 'dossier') reports.push(...bibleReportChapters(project));
+    if (content === 'clues' || content === 'dossier') reports.push(cluesReportChapter(project));
+    if (content === 'continuity' || content === 'dossier') reports.push(continuityReportChapter(project));
+    if (content === 'comments' || content === 'dossier') reports.push(commentsReportChapter(project));
+    if (content === 'statistics' || content === 'dossier') reports.push(statisticsReportChapter(project, contexts));
+    const labels = { bible: 'Biblia', clues: 'Pistas', continuity: 'Continuidad', comments: 'Comentarios', statistics: 'Estadísticas', dossier: 'Dossier narrativo' };
+    return { ...structuredCloneSafe(project), title: `${project.title} — ${labels[content] || 'Informe'}`, subtitle: project.subtitle, chapters: reports.filter(Boolean) };
+  }
+
+  function reportScene(title, html) {
+    return { id: uid('report-scene'), title, html: sanitizeEditorHtml(html || '<p>Sin datos.</p>'), meta: emptyMeta(), createdAt: nowIso(), updatedAt: nowIso() };
+  }
+
+  function bibleReportChapters(project) {
+    const groups = new Map();
+    (project.bible || []).forEach(entry => {
+      const type = entry.type || 'Documentación';
+      if (!groups.has(type)) groups.set(type, []);
+      groups.get(type).push(entry);
+    });
+    if (!groups.size) return [{ id: uid('report'), title: 'Biblia', notes: '', scenes: [reportScene('Biblia', '<p>No hay fichas en la biblia.</p>')] }];
+    return [...groups.entries()].map(([type, entries]) => ({ id: uid('report'), title: type, notes: '', scenes: entries.map(entry => reportScene(entry.name, `<h2>${escapeHtml(entry.name)}</h2>${entry.tags?.length ? `<p><em>${escapeHtml(entry.tags.join(' · '))}</em></p>` : ''}${entry.summary ? plainTextToHtml(entry.summary) : ''}${entry.content ? plainTextToHtml(entry.content) : ''}`)) }));
+  }
+
+  function cluesReportChapter(project) {
+    const clues = project.clues || [];
+    return { id: uid('report'), title: 'Pistas y revelaciones', notes: '', scenes: clues.length ? clues.map(clue => reportScene(clue.title, `<h2>${escapeHtml(clue.title)}</h2><p><strong>Estado:</strong> ${escapeHtml(clue.status)}</p>${plainTextToHtml(clue.description || 'Sin descripción.')}<p><strong>Siembra:</strong> ${escapeHtml(sceneLabel(clue.seedSceneId, project))}<br><strong>Refuerzo:</strong> ${escapeHtml(sceneLabel(clue.reinforceSceneId, project))}<br><strong>Revelación:</strong> ${escapeHtml(sceneLabel(clue.revealSceneId, project))}<br><strong>Resolución:</strong> ${escapeHtml(sceneLabel(clue.resolveSceneId, project))}</p>${clue.knownBy ? `<p><strong>La conocen:</strong> ${escapeHtml(clue.knownBy)}</p>` : ''}${clue.falseMeaning ? `<p><strong>Interpretación falsa:</strong> ${escapeHtml(clue.falseMeaning)}</p>` : ''}${clue.notes ? plainTextToHtml(clue.notes) : ''}`)) : [reportScene('Pistas', '<p>No hay pistas registradas.</p>')] };
+  }
+
+  function continuityReportChapter(project) {
+    const items = project.continuity || [];
+    return { id: uid('report'), title: 'Continuidad', notes: '', scenes: items.length ? items.map(item => reportScene(`${item.entity} · ${item.attribute}`, `<h2>${escapeHtml(item.entity)}</h2><p><strong>${escapeHtml(item.category)} · ${escapeHtml(item.attribute)}:</strong> ${escapeHtml(item.value || 'Sin valor')}</p><p><strong>Desde:</strong> ${escapeHtml(sceneLabel(item.fromSceneId, project))}<br><strong>Hasta:</strong> ${escapeHtml(sceneLabel(item.toSceneId, project))}</p>${item.notes ? plainTextToHtml(item.notes) : ''}`)) : [reportScene('Continuidad', '<p>No hay hechos de continuidad registrados.</p>')] };
+  }
+
+  function commentsReportChapter(project) {
+    const comments = project.comments || [];
+    return { id: uid('report'), title: 'Comentarios de revisión', notes: '', scenes: comments.length ? comments.map(comment => reportScene(`${comment.type} · ${sceneLabel(comment.sceneId, project)}`, `<h2>${escapeHtml(comment.type)}</h2><p><strong>Escena:</strong> ${escapeHtml(sceneLabel(comment.sceneId, project))}<br><strong>Estado:</strong> ${comment.resolved ? 'Resuelto' : 'Pendiente'}</p>${comment.excerpt ? `<p><em>“${escapeHtml(comment.excerpt)}”</em></p>` : ''}${plainTextToHtml(comment.note)}`)) : [reportScene('Comentarios', '<p>No hay comentarios registrados.</p>')] };
+  }
+
+  function statisticsReportChapter(project, contexts = flattenScenes(project)) {
+    const words = contexts.reduce((sum, item) => sum + countWords(htmlToText(item.scene.html)), 0);
+    const chars = contexts.reduce((sum, item) => sum + htmlToText(item.scene.html).length, 0);
+    const dialogueWords = contexts.reduce((sum, item) => sum + countWords(htmlToText(extractDialogueHtml(item.scene.html)).replace(/No se han detectado diálogos[^.]*\./g, '')), 0);
+    const chapterRows = project.chapters.map(chapter => {
+      const selected = contexts.filter(item => item.chapter.id === chapter.id);
+      if (!selected.length) return '';
+      const chapterWords = selected.reduce((sum, item) => sum + countWords(htmlToText(item.scene.html)), 0);
+      return `<p><strong>${escapeHtml(chapter.title)}:</strong> ${formatNumber(chapterWords)} palabras · ${selected.length} escenas</p>`;
+    }).join('');
+    const povs = new Map();
+    contexts.forEach(item => { const pov = item.scene.meta.pov || 'Sin definir'; povs.set(pov, (povs.get(pov) || 0) + 1); });
+    const povRows = [...povs.entries()].sort((a, b) => b[1] - a[1]).map(([pov, count]) => `<p><strong>${escapeHtml(pov)}:</strong> ${count} escenas</p>`).join('');
+    const html = `<h2>Resumen general</h2><p><strong>Palabras:</strong> ${formatNumber(words)}<br><strong>Caracteres:</strong> ${formatNumber(chars)}<br><strong>Capítulos incluidos:</strong> ${new Set(contexts.map(item => item.chapter.id)).size}<br><strong>Escenas incluidas:</strong> ${contexts.length}<br><strong>Lectura estimada:</strong> ${Math.max(1, Math.ceil(words / 220))} minutos<br><strong>Diálogo aproximado:</strong> ${words ? Math.round(dialogueWords / words * 100) : 0}%</p><h2>Por capítulo</h2>${chapterRows || '<p>Sin capítulos.</p>'}<h2>Distribución de POV</h2>${povRows || '<p>Sin POV definidos.</p>'}`;
+    return { id: uid('report'), title: 'Estadísticas del manuscrito', notes: '', scenes: [reportScene('Estadísticas', html)] };
+  }
+
+  function buildPlainText(project, options = {}) {
     const lines = [];
-    lines.push(project.title.toUpperCase());
-    if (project.subtitle) lines.push(project.subtitle);
-    if (project.author) lines.push(`\n${project.author}`);
-    lines.push('\n\f');
+    if (options.includeCover !== false) {
+      lines.push(project.title.toUpperCase());
+      if (project.subtitle) lines.push(project.subtitle);
+      if (project.author) lines.push('', project.author);
+      lines.push('', '\f');
+    }
     project.chapters.forEach((chapter, chapterIndex) => {
-      if (chapterIndex) lines.push('\n\f');
+      if (chapterIndex) lines.push('', '\f');
       lines.push(chapter.title.toUpperCase(), '');
       chapter.scenes.forEach((scene, sceneIndex) => {
         if (sceneIndex) lines.push('', '⁂', '');
@@ -1969,88 +2364,175 @@
     return lines.join('\n').replace(/\n{4,}/g, '\n\n\n');
   }
 
-  function buildMarkdown(project) {
-    const lines = ['---', `title: "${yamlEscape(project.title)}"`, `author: "${yamlEscape(project.author)}"`, `language: "${yamlEscape(project.language || 'es-ES')}"`, `words: ${projectWordCount(project)}`, '---', '', `# ${project.title}`];
-    if (project.subtitle) lines.push('', `## ${project.subtitle}`);
-    if (project.author) lines.push('', `**${project.author}**`);
+  function buildMarkdown(project, options = {}) {
+    const lines = [];
+    if (options.includeCover !== false) {
+      lines.push('---', `title: "${yamlEscape(project.title)}"`, `author: "${yamlEscape(project.author)}"`, `language: "${yamlEscape(project.language || 'es-ES')}"`, `words: ${projectWordCount(project)}`, '---', '', `# ${project.title}`);
+      if (project.subtitle) lines.push('', `## ${project.subtitle}`);
+      if (project.author) lines.push('', `**${project.author}**`);
+    }
     project.chapters.forEach(chapter => {
       lines.push('', `# ${chapter.title}`, '');
       chapter.scenes.forEach((scene, index) => {
         if (index) lines.push('', '⁂', '');
-        const meta = scene.meta;
-        const metaParts = [meta.pov && `POV: ${meta.pov}`, meta.place && `Lugar: ${meta.place}`, meta.date && `Fecha: ${meta.date}`, meta.time && `Hora: ${meta.time}`, meta.act && `Acto: ${meta.act}`].filter(Boolean);
-        if (metaParts.length) lines.push(`<!-- ${metaParts.join(' · ')} -->`, '');
         lines.push(htmlToMarkdown(scene.html));
       });
     });
-    return lines.join('\n').replace(/\n{4,}/g, '\n\n\n');
+    return lines.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
   }
 
-  async function buildDocx(project) {
+  function exportProfile(profileName = 'editorial') {
+    const profiles = {
+      editorial: { label: 'Manuscrito editorial', page: 'A4', width: '210mm', height: '297mm', font: 'Times New Roman', size: 12, line: 2, indent: '1.25cm', margin: '2.5cm', pageWidth: 11906, pageHeight: 16838, marginTop: 1417, marginRight: 1417, marginBottom: 1417, marginLeft: 1417, lineTwips: 480, indentTwips: 709 },
+      'print-a5': { label: 'Novela impresa A5', page: 'A5', width: '148mm', height: '210mm', font: 'Garamond', size: 11.5, line: 1.35, indent: '0.65cm', margin: '18mm 16mm 20mm 20mm', pageWidth: 8391, pageHeight: 11906, marginTop: 1020, marginRight: 907, marginBottom: 1134, marginLeft: 1134, lineTwips: 324, indentTwips: 369 },
+      'kdp-6x9': { label: 'KDP 6 × 9 pulgadas', page: '6in 9in', width: '6in', height: '9in', font: 'Garamond', size: 11, line: 1.3, indent: '0.25in', margin: '0.7in 0.6in 0.7in 0.75in', pageWidth: 8640, pageHeight: 12960, marginTop: 1008, marginRight: 864, marginBottom: 1008, marginLeft: 1080, lineTwips: 312, indentTwips: 360 },
+      digital: { label: 'Lectura digital', page: 'A4', width: '210mm', height: '297mm', font: 'Georgia', size: 12, line: 1.6, indent: '1.2cm', margin: '2.2cm', pageWidth: 11906, pageHeight: 16838, marginTop: 1247, marginRight: 1247, marginBottom: 1247, marginLeft: 1247, lineTwips: 384, indentTwips: 680 },
+      correction: { label: 'Documento de corrección', page: 'A4', width: '210mm', height: '297mm', font: 'Arial', size: 12, line: 2, indent: '0', margin: '3cm', pageWidth: 11906, pageHeight: 16838, marginTop: 1701, marginRight: 1701, marginBottom: 1701, marginLeft: 1701, lineTwips: 480, indentTwips: 0, paragraphAfter: 160 },
+      beta: { label: 'Copia para lector beta', page: 'A4', width: '210mm', height: '297mm', font: 'Georgia', size: 12, line: 1.65, indent: '1.2cm', margin: '2.4cm', pageWidth: 11906, pageHeight: 16838, marginTop: 1361, marginRight: 1361, marginBottom: 1361, marginLeft: 1361, lineTwips: 396, indentTwips: 680 }
+    };
+    return profiles[profileName] || profiles.editorial;
+  }
+
+  function buildHtmlDocument(project, options = {}) {
+    const profile = exportProfile(options.profile);
+    const toc = options.includeToc === false ? '' : `<nav class="toc"><h2>Índice</h2><ol>${project.chapters.map((chapter, index) => `<li><a href="#chapter-${index + 1}">${escapeHtml(chapter.title)}</a></li>`).join('')}</ol></nav>`;
+    const cover = options.includeCover === false ? '' : `<section class="cover"><h1>${escapeHtml(project.title)}</h1>${project.subtitle ? `<p>${escapeHtml(project.subtitle)}</p>` : ''}${project.author ? `<p class="author">${escapeHtml(project.author)}</p>` : ''}${options.reader ? `<p class="copy-id">Copia identificada: ${escapeHtml(options.reader)}</p>` : ''}</section>`;
+    const chapters = project.chapters.map((chapter, index) => `<section class="chapter" id="chapter-${index + 1}"><h1>${escapeHtml(chapter.title)}</h1>${chapter.scenes.map((scene, sceneIndex) => `${sceneIndex ? '<div class="scene-break">⁂</div>' : ''}${sanitizeEditorHtml(scene.html)}`).join('')}</section>`).join('');
+    return `<!doctype html><html lang="${escapeAttr(project.language || 'es-ES')}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(project.title)}</title><meta name="author" content="${escapeAttr(project.author || '')}"><style>
+      @page{size:${profile.page};margin:${profile.margin}}*{box-sizing:border-box}html{background:#e9e7e1}body{max-width:${profile.width};margin:24px auto;background:white;color:#181713;font-family:${JSON.stringify(profile.font)},serif;font-size:${profile.size}pt;line-height:${profile.line};padding:${profile.margin};box-shadow:0 12px 42px rgba(0,0,0,.16)}.cover{min-height:72vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;page-break-after:always}.cover h1{font-size:2.4em;margin:0 0 .5em}.author{margin-top:4em}.copy-id{margin-top:3em;border:1px solid #888;padding:.5em 1em;font-size:.85em}.toc{page-break-after:always}.toc a{color:inherit;text-decoration:none}.chapter{page-break-before:always}.chapter>h1{text-align:center;margin:15vh 0 3em;font-size:1.6em}.chapter p{margin:0;text-indent:${profile.indent}}.chapter h1+p,.chapter h2+p,.chapter h3+p,.chapter hr+p,.chapter .no-indent{text-indent:0}.chapter h2{margin:2em 0 1em;font-size:1.15em}.chapter h3{margin:1.8em 0 .8em;font-size:1em}.scene-break{text-align:center;margin:2em 0}.chapter hr{border:0;text-align:center;margin:2em 0}.chapter hr:after{content:'⁂'}@media print{html{background:white}body{max-width:none;margin:0;padding:0;box-shadow:none}.toc a{color:black}}@media screen and (max-width:760px){body{margin:0;padding:24px;max-width:none;box-shadow:none}.cover{min-height:80vh}}
+    </style></head><body>${cover}${toc}${chapters}</body></html>`;
+  }
+
+  function printExportDocument(project, options = {}) {
+    const popup = window.open('', '_blank');
+    if (popup) popup.opener = null;
+    if (!popup) throw new Error('El navegador ha bloqueado la ventana de impresión. Permite ventanas emergentes e inténtalo de nuevo.');
+    popup.document.open();
+    popup.document.write(buildHtmlDocument(project, options));
+    popup.document.close();
+    popup.addEventListener('load', () => setTimeout(() => { popup.focus(); popup.print(); }, 250), { once: true });
+  }
+
+  async function buildInterchangePackage(project, options = {}) {
+    const manuscript = prepareExportProject(project, { ...options, content: ['bible','clues','continuity','comments','statistics','dossier'].includes(options.content) ? 'manuscript' : options.content });
+    const bible = buildReportProject(project, { ...options, content: 'bible' });
+    const clues = buildReportProject(project, { ...options, content: 'clues' });
+    const continuity = buildReportProject(project, { ...options, content: 'continuity' });
+    const comments = buildReportProject(project, { ...options, content: 'comments' });
+    const statistics = buildReportProject(project, { ...options, content: 'statistics' }, resolveExportContexts(project, options));
+    const timeline = buildTimelineProject(project, options, resolveExportContexts(project, options));
+    const files = [
+      ['README.txt', `NOVEL FORGE 404 · PAQUETE INTEROPERABLE\n\nProyecto: ${project.title}\nAutor: ${project.author || ''}\nExportado: ${nowIso()}\n\nEl paquete contiene formatos abiertos y una copia JSON completa. Los archivos de planificación no modifican el manuscrito.`],
+      ['manuscrito/manuscrito.md', buildMarkdown(manuscript, options)],
+      ['manuscrito/manuscrito.txt', buildPlainText(manuscript, options)],
+      ['manuscrito/manuscrito.html', buildHtmlDocument(manuscript, options)],
+      ['planificacion/biblia.md', buildMarkdown(bible, { ...options, includeCover: false })],
+      ['planificacion/cronologia.md', buildMarkdown(timeline, { ...options, includeCover: false })],
+      ['planificacion/pistas.md', buildMarkdown(clues, { ...options, includeCover: false })],
+      ['planificacion/continuidad.md', buildMarkdown(continuity, { ...options, includeCover: false })],
+      ['revision/comentarios.md', buildMarkdown(comments, { ...options, includeCover: false })],
+      ['revision/estadisticas.md', buildMarkdown(statistics, { ...options, includeCover: false })],
+      ['datos/proyecto.json', JSON.stringify({ format: 'novel-forge-interchange', version: 1, exportedAt: nowIso(), project: structuredCloneSafe(project) }, null, 2)]
+    ];
+    return new Blob([createZip(files)], { type: 'application/zip' });
+  }
+
+
+  async function buildDocx(project, options = {}) {
     const files = [];
     const created = new Date().toISOString();
-    files.push(['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`]);
+    const profile = exportProfile(options.profile);
+    files.push(['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`]);
     files.push(['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`]);
-    files.push(['word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`]);
-    files.push(['word/styles.xml', docxStylesXml()]);
-    files.push(['word/settings.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="100"/><w:defaultTabStop w:val="708"/><w:characterSpacingControl w:val="doNotCompress"/></w:settings>`]);
-    files.push(['docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${xmlEscape(project.title)}</dc:title><dc:creator>${xmlEscape(project.author)}</dc:creator><cp:lastModifiedBy>Novel Forge 404</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified></cp:coreProperties>`]);
-    files.push(['docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Novel Forge 404</Application><AppVersion>1.2</AppVersion><DocSecurity>0</DocSecurity><ScaleCrop>false</ScaleCrop><Company></Company><LinksUpToDate>false</LinksUpToDate><SharedDoc>false</SharedDoc><HyperlinksChanged>false</HyperlinksChanged></Properties>`]);
-    files.push(['word/document.xml', buildDocumentXml(project)]);
+    files.push(['word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`]);
+    files.push(['word/styles.xml', docxStylesXml(options.profile)]);
+    files.push(['word/settings.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="100"/><w:defaultTabStop w:val="708"/><w:characterSpacingControl w:val="doNotCompress"/><w:doNotTrackMoves/><w:doNotTrackFormatting/></w:settings>`]);
+    files.push(['word/header1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/><w:color w:val="777777"/></w:rPr><w:t>${xmlEscape([project.author, project.title].filter(Boolean).join(' · '))}</w:t></w:r></w:p></w:hdr>`]);
+    files.push(['word/footer1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/><w:color w:val="777777"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`]);
+    files.push(['docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${xmlEscape(project.title)}</dc:title><dc:subject>${xmlEscape(project.genre || profile.label)}</dc:subject><dc:creator>${xmlEscape(project.author)}</dc:creator><dc:description>${xmlEscape(project.synopsis || '')}</dc:description><cp:lastModifiedBy>Novel Forge 404</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified></cp:coreProperties>`]);
+    files.push(['docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Novel Forge 404</Application><AppVersion>1.3</AppVersion><DocSecurity>0</DocSecurity><ScaleCrop>false</ScaleCrop><Company></Company><LinksUpToDate>false</LinksUpToDate><SharedDoc>false</SharedDoc><HyperlinksChanged>false</HyperlinksChanged></Properties>`]);
+    files.push(['word/document.xml', buildDocumentXml(project, options)]);
     return new Blob([createZip(files)], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
   }
 
-  function docxStylesXml() {
+  function docxStylesXml(profileName = 'editorial') {
+    const profile = exportProfile(profileName);
+    const font = xmlEscape(profile.font);
+    const halfPoints = Math.round(profile.size * 2);
+    const paragraphAfter = profile.paragraphAfter || 0;
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-      <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Garamond" w:hAnsi="Garamond"/><w:sz w:val="24"/><w:lang w:val="es-ES"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="360" w:lineRule="auto" w:after="0"/></w:pPr></w:pPrDefault></w:docDefaults>
-      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="708"/></w:pPr><w:rPr><w:rFonts w:ascii="Garamond" w:hAnsi="Garamond"/><w:sz w:val="24"/></w:rPr></w:style>
+      <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}"/><w:sz w:val="${halfPoints}"/><w:lang w:val="es-ES"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="${profile.lineTwips}" w:lineRule="auto" w:after="${paragraphAfter}"/></w:pPr></w:pPrDefault></w:docDefaults>
+      <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="${paragraphAfter}" w:line="${profile.lineTwips}" w:lineRule="auto"/><w:ind w:firstLine="${profile.indentTwips}"/></w:pPr><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}"/><w:sz w:val="${halfPoints}"/></w:rPr></w:style>
       <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Subtitle"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="1800" w:after="300"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="44"/></w:rPr></w:style>
-      <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:i/><w:sz w:val="28"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:i/><w:sz w:val="26"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="CopyId"><w:name w:val="Copy Identification"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="720" w:after="240"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:color w:val="777777"/><w:sz w:val="20"/></w:rPr></w:style>
       <w:style w:type="paragraph" w:styleId="ChapterTitle"><w:name w:val="Chapter Title"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:pageBreakBefore/><w:jc w:val="center"/><w:spacing w:before="900" w:after="600"/><w:keepNext/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="SceneTitle"><w:name w:val="Scene Title"/><w:basedOn w:val="NoIndent"/><w:qFormat/><w:pPr><w:spacing w:before="360" w:after="180"/><w:keepNext/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="${Math.max(halfPoints, 24)}"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="Notes"><w:name w:val="Notes"/><w:basedOn w:val="NoIndent"/><w:qFormat/><w:pPr><w:spacing w:before="240" w:after="120"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:i/><w:color w:val="666666"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="IndexTitle"><w:name w:val="Index Title"/><w:basedOn w:val="NoIndent"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="480" w:after="360"/><w:ind w:firstLine="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
+      <w:style w:type="paragraph" w:styleId="IndexItem"><w:name w:val="Index Item"/><w:basedOn w:val="NoIndent"/><w:qFormat/><w:pPr><w:spacing w:after="120"/><w:ind w:left="360" w:firstLine="0"/></w:pPr></w:style>
       <w:style w:type="paragraph" w:styleId="NoIndent"><w:name w:val="No Indent"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:ind w:firstLine="0"/></w:pPr></w:style>
       <w:style w:type="paragraph" w:styleId="SceneBreak"><w:name w:val="Scene Break"/><w:basedOn w:val="NoIndent"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="240"/></w:pPr></w:style>
     </w:styles>`;
   }
 
-  function buildDocumentXml(project) {
+  function buildDocumentXml(project, options = {}) {
+    const profile = exportProfile(options.profile);
     const body = [];
-    body.push(docxParagraph(project.title, 'Title'));
-    if (project.subtitle) body.push(docxParagraph(project.subtitle, 'Subtitle'));
-    if (project.author) body.push(docxParagraph(project.author, 'Subtitle'));
-    body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    if (options.includeCover !== false) {
+      body.push(docxParagraph(project.title, 'Title'));
+      if (project.subtitle) body.push(docxParagraph(project.subtitle, 'Subtitle'));
+      if (project.author) body.push(docxParagraph(project.author, 'Subtitle'));
+      if (options.reader) body.push(docxParagraph(`COPIA IDENTIFICADA · ${options.reader}`, 'CopyId'));
+      body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    }
+    if (options.includeToc !== false && project.chapters.length > 1) {
+      body.push(docxParagraph('Índice', 'IndexTitle'));
+      project.chapters.forEach(chapter => body.push(docxParagraph(chapter.title, 'IndexItem')));
+      body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    }
     project.chapters.forEach(chapter => {
       body.push(docxParagraph(chapter.title, 'ChapterTitle'));
-      let firstParagraph = true;
       chapter.scenes.forEach((scene, sceneIndex) => {
         if (sceneIndex) body.push(docxParagraph('⁂', 'SceneBreak'));
+        let firstParagraph = true;
         const blocks = htmlToDocxBlocks(scene.html);
         blocks.forEach(block => {
-          if (block.type === 'break') body.push(docxParagraph('⁂', 'SceneBreak'));
-          else {
-            body.push(docxRichParagraph(block.runs, firstParagraph ? 'NoIndent' : 'Normal'));
-            firstParagraph = false;
+          if (block.type === 'break') {
+            body.push(docxParagraph('⁂', 'SceneBreak'));
+            firstParagraph = true;
+          } else {
+            const style = block.style || (firstParagraph ? 'NoIndent' : 'Normal');
+            body.push(docxRichParagraph(block.runs, style));
+            if (!['SceneTitle','Notes','IndexTitle','IndexItem'].includes(style)) firstParagraph = false;
           }
         });
       });
     });
-    body.push('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1701" w:header="708" w:footer="708" w:gutter="0"/><w:cols w:space="708"/><w:docGrid w:linePitch="360"/></w:sectPr>');
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}</w:body></w:document>`;
+    const lineNumbers = options.profile === 'correction' ? '<w:lnNumType w:countBy="1" w:restart="newPage" w:distance="360"/>' : '';
+    body.push(`<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="${profile.pageWidth}" w:h="${profile.pageHeight}"/><w:pgMar w:top="${profile.marginTop}" w:right="${profile.marginRight}" w:bottom="${profile.marginBottom}" w:left="${profile.marginLeft}" w:header="568" w:footer="568" w:gutter="0"/>${lineNumbers}<w:cols w:space="708"/><w:docGrid w:linePitch="360"/></w:sectPr>`);
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join('')}</w:body></w:document>`;
   }
 
   function htmlToDocxBlocks(html) {
     const container = document.createElement('div');
     container.innerHTML = sanitizeEditorHtml(html);
     const blocks = [];
-    const blockNodes = [...container.childNodes];
-    blockNodes.forEach(node => {
-      if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) blocks.push({ type: 'paragraph', runs: [{ text: node.textContent }] });
-      else if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName === 'HR' || node.textContent.trim() === '⁂') blocks.push({ type: 'break' });
-        else blocks.push({ type: 'paragraph', runs: extractRuns(node) });
+    [...container.childNodes].forEach(node => {
+      if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+        blocks.push({ type: 'paragraph', runs: [{ text: node.textContent }] });
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName === 'HR' || node.textContent.trim() === '⁂') {
+          blocks.push({ type: 'break' });
+        } else {
+          const style = node.tagName === 'H2' ? 'SceneTitle' : node.tagName === 'H3' ? 'Notes' : '';
+          blocks.push({ type: 'paragraph', runs: extractRuns(node), style });
+        }
       }
     });
     return blocks.length ? blocks : [{ type: 'paragraph', runs: [{ text: '' }] }];
   }
+
 
   function extractRuns(root) {
     const runs = [];
@@ -2131,6 +2613,71 @@
     ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true); ev.setUint16(20, 0, true);
     return concatBytes([...localParts, ...centralParts, end]);
   }
+
+  async function extractEpubManuscript(buffer, sourceName = 'Libro EPUB') {
+    const files = await readZip(new Uint8Array(buffer));
+    let packagePath = '';
+    const containerBytes = files.get('META-INF/container.xml');
+    if (containerBytes) {
+      const containerXml = new TextDecoder('utf-8').decode(containerBytes);
+      const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml');
+      packagePath = containerDoc.getElementsByTagNameNS('*', 'rootfile')[0]?.getAttribute('full-path') || '';
+    }
+    if (!packagePath) packagePath = [...files.keys()].find(name => /\.opf$/i.test(name)) || '';
+    if (!packagePath || !files.has(packagePath)) throw new Error('El EPUB no contiene un paquete OPF válido');
+
+    const packageXml = new TextDecoder('utf-8').decode(files.get(packagePath));
+    const packageDoc = new DOMParser().parseFromString(packageXml, 'application/xml');
+    if (packageDoc.querySelector('parsererror')) throw new Error('El índice interno del EPUB está dañado');
+    const basePath = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
+    const manifest = new Map();
+    [...packageDoc.getElementsByTagNameNS('*', 'item')].forEach(item => {
+      const id = item.getAttribute('id');
+      const href = item.getAttribute('href');
+      if (id && href) manifest.set(id, { href, mediaType: item.getAttribute('media-type') || '', properties: item.getAttribute('properties') || '' });
+    });
+    let orderedItems = [...packageDoc.getElementsByTagNameNS('*', 'itemref')]
+      .map(item => manifest.get(item.getAttribute('idref')))
+      .filter(Boolean);
+    if (!orderedItems.length) orderedItems = [...manifest.values()].filter(item => /xhtml|html/i.test(item.mediaType) && !/nav/.test(item.properties));
+
+    const sections = [];
+    orderedItems.forEach((item, index) => {
+      const path = resolveArchivePath(basePath, item.href);
+      const bytes = files.get(path);
+      if (!bytes) return;
+      const source = new TextDecoder('utf-8').decode(bytes);
+      let doc = new DOMParser().parseFromString(source, 'application/xhtml+xml');
+      if (doc.querySelector('parsererror')) doc = new DOMParser().parseFromString(source, 'text/html');
+      const body = doc.querySelector('body');
+      if (!body) return;
+      body.querySelectorAll('script,style,nav,iframe,object,embed,form').forEach(node => node.remove());
+      const heading = body.querySelector('h1,h2');
+      const title = safeString(heading?.textContent, 240) || safeString(doc.querySelector('title')?.textContent, 240) || `Capítulo ${index + 1}`;
+      if (heading) heading.remove();
+      const html = sanitizeEditorHtml(body.innerHTML);
+      const text = htmlToText(html);
+      if (!text.trim()) return;
+      if (/^(portada|cover|índice|indice|contents)$/i.test(title.trim()) && countWords(text) < 35) return;
+      sections.push({ title, html });
+    });
+    if (!sections.length) throw new Error('No se han encontrado capítulos de texto en el EPUB');
+    return sections;
+  }
+
+  function resolveArchivePath(basePath, href) {
+    let decoded = String(href || '').split('#')[0];
+    try { decoded = decodeURIComponent(decoded); } catch { /* Mantener ruta original */ }
+    const parts = `${basePath}${decoded}`.replace(/\\/g, '/').split('/');
+    const normalized = [];
+    parts.forEach(part => {
+      if (!part || part === '.') return;
+      if (part === '..') normalized.pop();
+      else normalized.push(part);
+    });
+    return normalized.join('/');
+  }
+
 
   async function extractDocxManuscript(buffer, sourceName = 'Documento DOCX') {
     const files = await readZip(new Uint8Array(buffer));
@@ -2229,7 +2776,7 @@
     for (let i = 0; i < entries; i++) {
       if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) throw new Error('Directorio ZIP dañado');
       const flags = view.getUint16(offset + 8, true);
-      if (flags & 0x0001) throw new Error('Los DOCX cifrados no son compatibles');
+      if (flags & 0x0001) throw new Error('Los archivos ZIP cifrados no son compatibles');
       const method = view.getUint16(offset + 10, true);
       const compressedSize = view.getUint32(offset + 20, true);
       const uncompressedSize = view.getUint32(offset + 24, true);
@@ -2237,9 +2784,9 @@
       const extraLength = view.getUint16(offset + 30, true);
       const commentLength = view.getUint16(offset + 32, true);
       const localOffset = view.getUint32(offset + 42, true);
-      if (uncompressedSize > MAX_ZIP_ENTRY_BYTES) throw new Error('El DOCX contiene una entrada demasiado grande');
+      if (uncompressedSize > MAX_ZIP_ENTRY_BYTES) throw new Error('El archivo comprimido contiene una entrada demasiado grande');
       totalUncompressed += uncompressedSize;
-      if (totalUncompressed > MAX_ZIP_TOTAL_BYTES) throw new Error('El DOCX descomprimido es demasiado grande');
+      if (totalUncompressed > MAX_ZIP_TOTAL_BYTES) throw new Error('El archivo descomprimido es demasiado grande');
       const nameStart = offset + 46;
       const nameEnd = nameStart + nameLength;
       if (nameEnd > bytes.length) throw new Error('Nombre de archivo ZIP fuera de rango');
@@ -2264,10 +2811,10 @@
   }
 
   async function inflateRaw(bytes, expectedSize = 0) {
-    if (!('DecompressionStream' in window)) throw new Error('Este navegador no permite importar DOCX comprimidos. Prueba con Chrome, Edge, Firefox o Safari actualizado.');
+    if (!('DecompressionStream' in window)) throw new Error('Este navegador no permite abrir archivos ZIP comprimidos. Prueba con Chrome, Edge, Firefox o Safari actualizado.');
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const data = new Uint8Array(await new Response(stream).arrayBuffer());
-    if (expectedSize && data.length !== expectedSize) throw new Error('El DOCX contiene una entrada con tamaño incoherente');
+    if (expectedSize && data.length !== expectedSize) throw new Error('El archivo comprimido contiene una entrada con tamaño incoherente');
     return data;
   }
 
@@ -2861,7 +3408,7 @@
   }
 
   function backupPayload(project) {
-    return { format: 'novel-forge-404', version: 3, exportedAt: nowIso(), project: structuredCloneSafe(project) };
+    return { format: 'novel-forge-404', version: 4, exportedAt: nowIso(), project: structuredCloneSafe(project) };
   }
 
   async function writeFolderFile(filename, content) {
@@ -2954,27 +3501,30 @@
     }
   }
 
-  async function buildEpub(project) {
+  async function buildEpub(project, options = {}) {
     const identifier = `urn:novelforge:${project.id.replace(/[^a-zA-Z0-9._-]/g, '') || uid('book')}`;
     const modified = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     const chapterFiles = project.chapters.map((chapter, index) => {
       const body = chapter.scenes.map((scene, sceneIndex) => `${sceneIndex ? '<div class="scene-break">⁂</div>' : ''}${epubHtmlFragment(scene.html)}`).join('\n');
-      return [`OEBPS/chapter-${index + 1}.xhtml`, `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(project.language || 'es')}"><head><title>${xmlEscape(chapter.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><h1>${xmlEscape(chapter.title)}</h1>${body}</body></html>`];
+      return [`OEBPS/chapter-${index + 1}.xhtml`, `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(project.language || 'es')}"><head><title>${xmlEscape(chapter.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><section class="chapter"><h1>${xmlEscape(chapter.title)}</h1>${body}</section></body></html>`];
     });
     const manifestChapters = project.chapters.map((chapter, index) => `<item id="chapter-${index + 1}" href="chapter-${index + 1}.xhtml" media-type="application/xhtml+xml"/>`).join('');
     const spine = project.chapters.map((chapter, index) => `<itemref idref="chapter-${index + 1}"/>`).join('');
     const navItems = project.chapters.map((chapter, index) => `<li><a href="chapter-${index + 1}.xhtml">${xmlEscape(chapter.title)}</a></li>`).join('');
+    const includeCover = options.includeCover !== false;
+    const coverFile = ['OEBPS/cover.xhtml', `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(project.language || 'es')}"><head><title>Portada</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><section class="cover"><h1>${xmlEscape(project.title)}</h1>${project.subtitle ? `<p>${xmlEscape(project.subtitle)}</p>` : ''}<p class="author">${xmlEscape(project.author || '')}</p>${options.reader ? `<p class="copy-id">Copia identificada: ${xmlEscape(options.reader)}</p>` : ''}</section></body></html>`];
     const files = [
       ['mimetype', 'application/epub+zip'],
       ['META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`],
-      ['OEBPS/style.css', `body{font-family:serif;line-height:1.55;margin:5%;}h1{text-align:center;margin:18% 0 8%;page-break-before:always;}p{margin:0;text-indent:1.5em;}h1+p,h2+p,.no-indent{text-indent:0}.scene-break{text-align:center;margin:1.8em 0;}blockquote{margin:1em 2em;font-style:italic}`],
-      ['OEBPS/cover.xhtml', `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(project.language || 'es')}"><head><title>Portada</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><section style="text-align:center;margin-top:30%"><h1 style="page-break-before:auto">${xmlEscape(project.title)}</h1>${project.subtitle ? `<p class="no-indent">${xmlEscape(project.subtitle)}</p>` : ''}<p class="no-indent">${xmlEscape(project.author || '')}</p></section></body></html>`],
+      ['OEBPS/style.css', `body{font-family:serif;line-height:1.55;margin:5%;}h1{text-align:center;margin:18% 0 8%;page-break-before:always;}h2{font-size:1.15em;margin:2em 0 1em;}h3{font-size:1em;margin:1.8em 0 .8em;}p{margin:0;text-indent:1.5em;}h1+p,h2+p,h3+p,hr+p,.no-indent,.cover p{text-indent:0}.scene-break{text-align:center;margin:1.8em 0;}blockquote{margin:1em 2em;font-style:italic}.cover{text-align:center;margin-top:28%;page-break-after:always}.cover h1{page-break-before:auto;font-size:2em;margin-bottom:1em}.cover .author{margin-top:4em}.copy-id{margin-top:3em;font-size:.85em;border:1px solid #888;padding:.5em}`],
       ['OEBPS/nav.xhtml', `<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${xmlEscape(project.language || 'es')}"><head><title>Índice</title></head><body><nav epub:type="toc"><h1>Índice</h1><ol>${navItems}</ol></nav></body></html>`],
-      ['OEBPS/package.opf', `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="${xmlEscape(project.language || 'es')}"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">${xmlEscape(identifier)}</dc:identifier><dc:title>${xmlEscape(project.title)}</dc:title><dc:creator>${xmlEscape(project.author || '')}</dc:creator><dc:language>${xmlEscape(project.language || 'es-ES')}</dc:language><meta property="dcterms:modified">${modified}</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="style" href="style.css" media-type="text/css"/>${manifestChapters}</manifest><spine><itemref idref="cover" linear="yes"/>${spine}</spine></package>`],
+      ['OEBPS/package.opf', `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="${xmlEscape(project.language || 'es')}"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">${xmlEscape(identifier)}</dc:identifier><dc:title>${xmlEscape(project.title)}</dc:title><dc:creator>${xmlEscape(project.author || '')}</dc:creator><dc:language>${xmlEscape(project.language || 'es-ES')}</dc:language>${project.genre ? `<dc:subject>${xmlEscape(project.genre)}</dc:subject>` : ''}${project.synopsis ? `<dc:description>${xmlEscape(project.synopsis)}</dc:description>` : ''}<dc:publisher>Novel Forge 404</dc:publisher><meta property="dcterms:modified">${modified}</meta></metadata><manifest>${includeCover ? '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>' : ''}<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="style" href="style.css" media-type="text/css"/>${manifestChapters}</manifest><spine>${includeCover ? '<itemref idref="cover" linear="yes"/>' : ''}${spine}</spine></package>`],
       ...chapterFiles
     ];
+    if (includeCover) files.splice(3, 0, coverFile);
     return new Blob([createZip(files)], { type: 'application/epub+zip' });
   }
+
 
   function epubHtmlFragment(html) {
     const clean = sanitizeEditorHtml(html || '<p></p>')
@@ -2986,6 +3536,7 @@
 
 
   function scheduleSave() {
+    state.saveRevision += 1;
     els.saveState.textContent = 'Guardando…';
     els.saveState.className = 'save-state saving';
     clearTimeout(state.saveTimer);
@@ -2994,6 +3545,7 @@
 
   function flushSave() {
     flushEditorToState();
+    state.saveRevision += 1;
     clearTimeout(state.saveTimer);
     void persistImmediately();
   }
@@ -3006,6 +3558,7 @@
   function persistImmediately() {
     flushEditorToState();
     clearTimeout(state.saveTimer);
+    const revision = state.saveRevision;
     const snapshot = structuredCloneSafe(state.projects);
     state.saveChain = state.saveChain.catch(() => undefined).then(async () => {
       let persisted = false;
@@ -3023,6 +3576,12 @@
       }
       safeStorage.setItem(ACTIVE_KEY, state.activeProjectId || '');
       if (!persisted) throw new Error('El navegador no ha podido persistir el proyecto');
+      state.persistedRevision = Math.max(state.persistedRevision, revision);
+      if (state.persistedRevision < state.saveRevision) {
+        clearTimeout(state.saveTimer);
+        state.saveTimer = setTimeout(() => { void persistImmediately(); }, 0);
+        return;
+      }
       els.saveState.textContent = 'Guardado';
       els.saveState.className = 'save-state saved';
       setTimeout(() => els.saveState.classList.remove('saved'), 1200);
@@ -3214,6 +3773,46 @@
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
+  }
+
+
+  function rememberEditorSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !els.editor) return;
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (container && els.editor.contains(container)) state.savedEditorRange = range.cloneRange();
+  }
+
+  function restoreEditorSelection() {
+    els.editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    if (state.savedEditorRange && els.editor.contains(state.savedEditorRange.commonAncestorContainer)) {
+      selection.addRange(state.savedEditorRange);
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(els.editor);
+    range.collapse(false);
+    selection.addRange(range);
+  }
+
+  function showFatalStartupError(error) {
+    const banner = document.createElement('section');
+    banner.className = 'fatal-startup';
+    banner.setAttribute('role', 'alert');
+    const title = document.createElement('strong');
+    title.textContent = 'Novel Forge no ha podido iniciarse.';
+    const detail = document.createElement('p');
+    detail.textContent = 'Recarga la página. Si el problema continúa, abre la consola del navegador y copia el primer error.';
+    const technical = document.createElement('code');
+    technical.textContent = String(error?.message || error || 'Error desconocido');
+    banner.append(title, detail, technical);
+    document.body.prepend(banner);
   }
 
   function registerServiceWorker() {

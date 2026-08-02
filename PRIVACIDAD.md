@@ -1,30 +1,27 @@
-# Privacidad
+# Privacidad — Novel Forge 404
 
-Novel Forge 404 no incluye cuentas, analítica, telemetría, publicidad ni servicios externos.
+Novel Forge 404 procesa manuscritos, fichas, comentarios y archivos íntegramente en el dispositivo del usuario.
 
-## Tratamiento de datos
+## Datos locales
 
-- Manuscritos, fichas, pistas, continuidad y comentarios se procesan en el dispositivo.
-- La aplicación no envía contenido a servidores propios ni de terceros.
-- IndexedDB almacena proyectos e instantáneas.
-- `localStorage` solo se utiliza para preferencias, proyecto activo y compatibilidad.
-- La lectura en voz alta emplea las voces disponibles en el dispositivo.
+- Los proyectos se guardan preferentemente en IndexedDB.
+- Las preferencias ligeras pueden utilizar localStorage.
+- Las instantáneas y autocopias permanecen dentro del proyecto local.
+- No se envían manuscritos, estadísticas ni metadatos a servidores externos.
+- No existen cuentas, publicidad, analítica ni telemetría.
 
-## Carpetas vinculadas
+## Importación
 
-En navegadores compatibles, el usuario puede elegir una carpeta mediante File System Access API. La aplicación conserva el identificador de acceso en IndexedDB y solo escribe archivos después de recibir permiso del navegador.
+TXT, Markdown, DOCX, EPUB, JSON y `.novel404` se leen localmente. El contenido HTML importado se sanea antes de incorporarse al editor.
 
-- No explora otras carpetas.
-- No sube los archivos.
-- La carpeta puede desvincularse sin borrar su contenido.
-- El navegador puede retirar el permiso y exigir una nueva autorización.
+Los EPUB con DRM o archivos comprimidos cifrados no son compatibles.
 
-## Copias
+## Exportación
 
-Las autocopias internas no sustituyen una copia externa. Los datos locales pueden perderse al borrar datos del sitio, usar navegación privada, cambiar de perfil o sufrir daños en el dispositivo.
+DOCX, EPUB, HTML, Markdown, TXT, ZIP, JSON y `.novel404` se generan en el navegador. La opción PDF utiliza el cuadro de impresión del navegador; el contenido no se envía a Novel Forge 404.
 
-Se recomienda conservar periódicamente una copia `.novel404` fuera del navegador.
+Al guardar en una carpeta vinculada, el navegador solicita permiso explícito. Novel Forge solo escribe las copias que el usuario ordena.
 
-## Publicación propia
+## Recomendación
 
-Esta declaración describe la versión entregada sin modificaciones. Revisa cualquier analítica, fuente, script, API o servicio externo que añadas posteriormente.
+El almacenamiento del navegador puede borrarse por limpieza de datos, políticas corporativas, modo privado o restablecimiento del dispositivo. Mantén copias externas `.novel404` y, para máxima interoperabilidad, un paquete ZIP o DOCX actualizado.

@@ -9,14 +9,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Novel Forge">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <meta name="description" content="Editor local de novelas en español con planificación visual, continuidad, pistas, comentarios y exportación TXT, Markdown, DOCX y EPUB.">
+  <meta name="description" content="Editor local de novelas en español con planificación visual, continuidad, pistas y un centro de exportación profesional DOCX, EPUB, PDF, HTML, Markdown, TXT y ZIP.">
   <title>Novel Forge 404</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=1.4.0">
 </head>
 <body>
+  <noscript><section class="fatal-startup" role="alert"><strong>JavaScript está desactivado.</strong><p>Novel Forge necesita JavaScript para editar y guardar novelas.</p></section></noscript>
   <a class="skip-link" href="#editor">Saltar al editor</a>
 
   <header class="topbar">
@@ -24,7 +25,7 @@
       <img src="assets/icon.svg" alt="" width="38" height="38">
       <div>
         <strong>Novel Forge 404</strong>
-        <span>Estudio narrativo local</span>
+        <span>Estudio narrativo local · v1.4 Stable</span>
       </div>
     </div>
 
@@ -276,9 +277,9 @@
   </dialog>
 
   <button type="button" id="panelBackdrop" class="panel-backdrop" data-action="close-panels" aria-label="Cerrar panel abierto" tabindex="-1"></button>
-  <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.docx,.json,.novel404" aria-label="Seleccionar archivos para importar">
+  <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.docx,.epub,.json,.novel404" aria-label="Seleccionar archivos para importar">
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
 
-  <script src="app.js" defer></script>
+  <script src="app.js?v=1.4.0" defer></script>
 </body>
 </html>

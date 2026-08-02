@@ -423,3 +423,38 @@ body.paper-dark .editor:empty::before { color: #6f7887; }
 }
 .range-value { color: var(--muted); font-size: 11px; }
 .card-column { background: var(--surface); background: color-mix(in srgb, var(--surface) 88%, transparent); }
+
+/* Novel Forge 404 v1.3 · Centro de exportación */
+.dialog.dialog-wide { width: min(940px, calc(100vw - 24px)); }
+.export-studio { display: grid; gap: 14px; }
+.export-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 15px 16px; border: 1px solid rgba(185,149,255,.38); border-radius: 12px; background: linear-gradient(135deg, var(--accent-soft), var(--surface-2)); }
+.export-hero strong, .export-hero span { display: block; }
+.export-hero strong { font-size: 17px; }
+.export-hero div > span { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.export-version { flex: 0 0 auto; padding: 4px 8px; border-radius: 999px; background: var(--accent-strong); color: #fff; font-size: 11px; font-weight: 800; }
+.export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.export-grid fieldset { margin: 0; }
+.export-grid label, .export-beta-options label { display: grid; gap: 6px; margin-bottom: 11px; color: var(--muted); font-size: 12px; }
+.export-grid label:last-child { margin-bottom: 0; }
+.export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 18px; }
+.export-options .checkbox-line { display: flex; color: var(--text); font-size: 13px; }
+.export-scope-target { margin-top: 10px; }
+.export-scenes { max-height: 245px; overflow: auto; display: grid; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--input); }
+.export-scenes section { display: grid; gap: 2px; }
+.export-scenes section > strong { position: sticky; top: -10px; z-index: 1; padding: 8px 2px 5px; background: var(--input); font-size: 12px; }
+.export-scenes label { margin: 0; padding: 4px 2px; font-size: 12px; }
+.export-scenes small { margin-left: auto; color: var(--muted); }
+.export-beta-options { display: grid; grid-template-columns: .85fr 1.4fr; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.export-preview { display: grid; gap: 4px; padding: 13px 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.export-preview span, .export-preview small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.export-preview small { color: var(--warning); }
+@media (max-width: 760px) {
+  .dialog.dialog-wide { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .export-grid, .export-beta-options, .export-options { grid-template-columns: 1fr; }
+  .export-hero { padding: 13px; }
+  .export-scenes { max-height: 200px; }
+}
+
+
+/* v1.4 Stable: diagnóstico de arranque */
+.fatal-startup{position:relative;z-index:99999;margin:12px;padding:14px 16px;border:1px solid #e35d6a;border-radius:10px;background:#32151a;color:#fff;box-shadow:0 10px 30px #0008}.fatal-startup strong{display:block;font-size:1rem}.fatal-startup p{margin:.4rem 0}.fatal-startup code{display:block;overflow-wrap:anywhere;color:#ffd4d8}
