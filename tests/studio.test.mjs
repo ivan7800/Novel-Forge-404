@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {findMatches,replaceCurrent,replaceEvery,buildGraph,graphLayout} from '../src/studio.js';
+assert.deepEqual(findMatches('Casa casa', 'casa'),[{start:0,end:4},{start:5,end:9}]);
+assert.deepEqual(findMatches('texto',''),[]);
+assert.equal(replaceCurrent('sol y sol','sol','luna',{start:0,end:3}).text,'luna y sol');
+assert.equal(replaceCurrent('sol y sol','sol','luna',{start:2,end:4}).changed,false);
+assert.equal(replaceEvery('uno DOS dos','dos','tres').text,'uno tres tres');
+assert.deepEqual(replaceEvery('abc','','X'),{text:'abc',count:0});
+const graph=buildGraph({scenes:[{id:'s1',title:'Escena'}],characters:[{id:'c1',name:'Ana'}],places:[],plotlines:[],events:[],links:[{sourceType:'character',sourceId:'c1',targetType:'scene',targetId:'s1',relation:'aparece'},{sourceType:'character',sourceId:'c1',targetType:'scene',targetId:'lost'}]});
+assert.equal(graph.nodes.length,2);assert.equal(graph.edges.length,1);
+assert.equal(graphLayout(graph.nodes,graph.edges).length,2);
+console.log('OK: búsqueda, reemplazo y proyección de relaciones');

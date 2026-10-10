@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {extractCandidates,newCandidates} from '../src/extraction.js';
+const scene=(content,date='1800')=>({id:'s1',projectId:'p1',content,storyDate:date,title:'Escena'});
+test('extracts ages and exact evidence with source scene',()=>{const c=extractCandidates([scene('Bruna Rovira tiene 9 años. Juana tiene 22 años.')]);assert.equal(c.length,2);assert.equal(c[0].subject,'Bruna Rovira');assert.equal(c[0].attribute,'Edad');assert.equal(c[0].value,'9 años');assert.equal(c[0].scope,'1800');assert.equal(c[0].sceneId,'s1');assert.match(c[0].evidence,/Bruna Rovira/)});
+test('finds explicit birth place',()=>{const c=extractCandidates([scene('Bruna nació en Barcelona.')]);assert.equal(c[0].attribute,'Lugar de nacimiento');assert.equal(c[0].value,'Barcelona')});
+test('never interprets arbitrary prose as a fact',()=>assert.deepEqual(extractCandidates([scene('La noche era oscura, y las campanas doblaron.')]),[]));
+test('does not extract from scenes of unknown identity',()=>assert.deepEqual(extractCandidates([{content:'Bruna tiene 9 años.'}]),[]));
+test('does not re-offer approved same evidence',()=>{const c=extractCandidates([scene('Bruna tiene 9 años.')]);assert.equal(newCandidates(c,[c[0]]).length,0)});
+test('respects candidate bound',()=>{const c=extractCandidates([scene('Ana tiene 12 años. Bea tiene 13 años. Eva tiene 14 años.')],{maxCandidates:2});assert.equal(c.length,2)});
+test('does not confuse narrator with character',()=>{const c=extractCandidates([scene('Ella tiene 9 años.')]);assert.equal(c.length,0)});

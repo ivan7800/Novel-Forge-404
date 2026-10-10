@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validateLocalEndpoint,parseLocalSuggestions,proposeWithLocalAI} from '../src/local-ai.js';
+const scene={id:'s',projectId:'p',storyDate:'1800',content:'Bruna tenía nueve años.'};
+test('only localhost and loopback endpoints accepted',()=>{assert.equal(validateLocalEndpoint('http://127.0.0.1:11434'), 'http://127.0.0.1:11434/api/generate');for(const bad of ['https://example.com','http://192.168.1.7:11434','javascript:alert(1)','http://localhost:11434@evil.test','http://localhost:11434/api/tags'])assert.throws(()=>validateLocalEndpoint(bad))});
+test('requires literal evidence in scene',()=>{const input={facts:[{subject:'Bruna',attribute:'Edad',value:'9',evidence:'Bruna tenía nueve años.'},{subject:'Ana',attribute:'Edad',value:'10',evidence:'Ana tenía diez años.'}]};const result=parseLocalSuggestions(input,scene);assert.equal(result.length,1);assert.equal(result[0].origin,'local-ai')});
+test('AI proposals are parsed without saving anything',async()=>{let called=0;const proposals=await proposeWithLocalAI(scene,{fetchImpl:async(uri,options)=>{called++;assert.match(uri,/127.0.0.1/);assert.equal(options.method,'POST');return {ok:true,text:async()=>JSON.stringify({response:JSON.stringify({facts:[{subject:'Bruna',attribute:'Edad',value:'nueve años',evidence:'Bruna tenía nueve años.'}]})})}}});assert.equal(called,1);assert.equal(proposals.length,1);assert.equal(proposals[0].projectId,'p')});
+test('rejects oversized scene before network',async()=>await assert.rejects(()=>proposeWithLocalAI({...scene,content:'a'.repeat(12001)},{fetchImpl:()=>{throw Error('called network')}}),/demasiado larga/));

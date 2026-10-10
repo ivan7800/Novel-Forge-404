@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {analyzeContinuity} from '../src/continuity.js';
+import {findingKey} from '../src/intelligence.js';
+const scene=(id,storyOrder)=>({id,projectId:'p',title:id,storyOrder,storyDate:'Año 1800'});
+test('un vínculo válido no genera advertencia',()=>{const out=analyzeContinuity('p',{scenes:[scene('s1',1)],characters:[{id:'c1',projectId:'p'}],links:[{id:'l',projectId:'p',sourceType:'character',sourceId:'c1',targetType:'scene',targetId:'s1'}]});assert.equal(out.length,0)});
+test('vínculo huérfano es señalado, sin eliminar datos',()=>{const out=analyzeContinuity('p',{scenes:[],links:[{id:'l',projectId:'p',sourceType:'character',sourceId:'missing',targetType:'scene',targetId:'missing'}]});assert.equal(out[0].type,'broken-link')});
+test('órdenes cronológicos coincidentes enlazan a ambas escenas',()=>{const out=analyzeContinuity('p',{scenes:[scene('a',3),scene('b',3)],links:[]});assert.equal(out[0].type,'shared-order');assert.deepEqual(out[0].evidence.map(x=>x.sceneId),['a','b'])});
+test('escenas de otras novelas no generan falsas coincidencias',()=>{const out=analyzeContinuity('p',{scenes:[scene('a',3),{...scene('b',3),projectId:'q'}]});assert.equal(out.length,0)});
+test('clave de revisión determinista y cambia al cambiar evidencia',()=>{const finding={type:'conflict',ids:['a','b'],detail:'x',evidence:[{sceneId:'s',quote:'cita'}]};assert.equal(findingKey(finding),findingKey({...finding}));assert.notEqual(findingKey(finding),findingKey({...finding,detail:'y'}))});

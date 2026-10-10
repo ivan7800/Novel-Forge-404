@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101218">
+  <meta name="application-name" content="Novel Forge 404">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Novel Forge">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="description" content="Editor local de novelas en español con planificación visual, continuidad, pistas y un centro de exportación profesional DOCX, EPUB, PDF, HTML, Markdown, TXT y ZIP.">
+  <title>Novel Forge 404</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="styles.css?v=1.4.0">
+</head>
+<body>
+  <noscript><section class="fatal-startup" role="alert"><strong>JavaScript está desactivado.</strong><p>Novel Forge necesita JavaScript para editar y guardar novelas.</p></section></noscript>
+  <a class="skip-link" href="#editor">Saltar al editor</a>
+
+  <header class="topbar">
+    <div class="brand" aria-label="Novel Forge 404">
+      <img src="assets/icon.svg" alt="" width="38" height="38">
+      <div>
+        <strong>Novel Forge 404</strong>
+        <span>Editor profesional · Fusión alpha</span>
+      </div>
+    </div>
+
+    <nav class="top-actions" aria-label="Acciones del proyecto"><a class="go-intelligence" href="../" title="Analizar una copia de la novela">◈ Inteligencia narrativa ↗</a>
+      <button type="button" class="icon-button mobile-only" data-action="toggle-sidebar" title="Estructura" aria-label="Abrir estructura" aria-expanded="false">☰</button>
+      <button type="button" class="ghost" data-action="new-project">Nueva novela</button>
+      <button type="button" class="ghost" data-action="import">Importar</button>
+      <button type="button" class="primary" data-action="export">Exportar</button>
+      <button type="button" class="ghost desktop-only" data-action="save-folder" title="Guardar una copia en la carpeta vinculada">Guardar copia</button>
+      <button type="button" class="icon-button mobile-only" data-action="mobile-actions" title="Más acciones" aria-label="Más acciones">＋</button>
+      <button type="button" class="icon-button" data-action="focus" title="Modo enfoque" aria-label="Activar modo enfoque" aria-pressed="false">◫</button>
+      <button type="button" class="icon-button mobile-only" data-action="toggle-inspector" title="Inspector" aria-label="Abrir inspector">ⓘ</button>
+      <button type="button" class="icon-button" data-action="settings" title="Ajustes" aria-label="Ajustes">⚙</button>
+    </nav>
+  </header>
+
+  <main class="app-shell">
+    <aside class="sidebar panel" aria-label="Estructura de la novela" id="sidebarPanel">
+      <div class="mobile-panel-heading mobile-only">
+        <strong>Estructura</strong>
+        <button type="button" class="icon-button" data-action="close-panels" aria-label="Cerrar estructura">×</button>
+      </div>
+      <div class="project-card">
+        <label for="projectSelect">Proyecto</label>
+        <div class="project-select-row">
+          <select id="projectSelect" aria-label="Seleccionar proyecto"></select>
+          <button type="button" class="icon-button compact" data-action="project-info" title="Datos del proyecto" aria-label="Datos del proyecto">i</button>
+        </div>
+        <div class="project-progress" aria-label="Progreso de palabras">
+          <div><span id="projectWords">0</span> / <span id="projectGoal">80.000</span> palabras</div>
+          <progress id="projectProgress" max="100" value="0"></progress>
+        </div>
+      </div>
+
+      <div class="section-heading">
+        <h2>Estructura</h2>
+        <div>
+          <button type="button" class="icon-button compact" data-action="add-chapter" title="Añadir capítulo" aria-label="Añadir capítulo">＋</button>
+          <button type="button" class="icon-button compact" data-action="add-scene" title="Añadir escena" aria-label="Añadir escena">▤</button>
+        </div>
+      </div>
+
+      <div id="outline" class="outline" role="tree" aria-label="Capítulos y escenas"></div>
+
+      <div class="sidebar-bottom" aria-label="Vistas del proyecto">
+        <button type="button" class="nav-button" data-view="manuscript" aria-pressed="true">✍ Manuscrito</button>
+        <button type="button" class="nav-button" data-view="cards">▦ Tarjetas</button>
+        <button type="button" class="nav-button" data-view="timeline">⌁ Cronología</button>
+        <button type="button" class="nav-button" data-view="clues">◇ Pistas</button>
+        <button type="button" class="nav-button" data-view="continuity">≋ Continuidad</button>
+        <button type="button" class="nav-button" data-view="comments">☵ Comentarios <span id="commentBadge" class="nav-badge" hidden>0</span></button>
+        <button type="button" class="nav-button" data-view="bible">◈ Biblia</button>
+        <button type="button" class="nav-button" data-view="analysis">◉ Análisis</button>
+        <button type="button" class="nav-button" data-view="trash">♲ Papelera</button>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="editor-toolbar" role="toolbar" aria-label="Formato y herramientas de escritura">
+        <div class="toolbar-group">
+          <button type="button" data-command="bold" title="Negrita" aria-label="Negrita"><strong>N</strong></button>
+          <button type="button" data-command="italic" title="Cursiva" aria-label="Cursiva"><em>C</em></button>
+          <button type="button" data-command="removeFormat" title="Limpiar formato" aria-label="Limpiar formato">Tx</button>
+        </div>
+        <div class="toolbar-group typography-tools">
+          <button type="button" data-insert="—" title="Raya de diálogo" aria-label="Insertar raya de diálogo">—</button>
+          <button type="button" data-pair="«|»" title="Comillas latinas" aria-label="Insertar comillas latinas">« »</button>
+          <button type="button" data-pair="“|”" title="Comillas inglesas" aria-label="Insertar comillas inglesas">“ ”</button>
+          <button type="button" data-insert="…" title="Puntos suspensivos" aria-label="Insertar puntos suspensivos">…</button>
+          <button type="button" data-insert="⁂" title="Separador de escena" aria-label="Insertar separador de escena">⁂</button>
+        </div>
+        <div class="toolbar-group">
+          <button type="button" data-action="normalize" title="Normalizar tipografía española" aria-label="Normalizar tipografía española">✓ Tipografía</button>
+          <button type="button" data-action="find" title="Buscar y reemplazar" aria-label="Buscar y reemplazar">⌕ Buscar</button>
+          <button type="button" data-action="read-aloud" title="Leer en voz alta" aria-label="Leer escena en voz alta" aria-pressed="false">▶ Leer</button>
+        </div>
+        <div class="toolbar-group">
+          <button type="button" data-action="add-comment" title="Comentar selección o escena" aria-label="Añadir comentario">☵ Comentar</button>
+          <button type="button" data-action="compare-versions" title="Comparar con una instantánea" aria-label="Comparar versiones">⇄ Comparar</button>
+          <button type="button" data-action="toggle-split" title="Abrir editor dividido" aria-label="Abrir editor dividido" aria-pressed="false">◫ Dividir</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div id="saveState" class="save-state" aria-live="polite">Guardado</div>
+      </div>
+
+      <div id="manuscriptView" class="view active-view">
+        <div id="editorSplitShell" class="editor-split-shell">
+          <section class="editor-pane primary-editor-pane" aria-label="Editor principal">
+            <div class="document-header">
+              <input id="chapterTitle" class="chapter-title" value="Capítulo 1" aria-label="Título del capítulo">
+              <input id="sceneTitle" class="scene-title" value="Escena 1" aria-label="Título de la escena">
+            </div>
+            <p id="editorHelp" class="sr-only">Editor de la escena. Puedes escribir, pegar texto o usar los botones tipográficos de la barra superior.</p>
+            <article id="editor" class="editor" contenteditable="true" role="textbox" aria-label="Texto de la escena" aria-describedby="editorHelp" aria-multiline="true" spellcheck="true" data-placeholder="Empieza a escribir, pega un texto existente o importa un manuscrito…"></article>
+          </section>
+          <section id="splitPane" class="editor-pane split-pane" aria-label="Editor secundario" hidden>
+            <div class="split-header">
+              <label for="splitSceneSelect">Documento de referencia</label>
+              <div class="split-header-row">
+                <select id="splitSceneSelect" aria-label="Escena del editor secundario"></select>
+                <button type="button" class="icon-button compact" data-action="close-split" aria-label="Cerrar editor dividido">×</button>
+              </div>
+              <input id="splitSceneTitle" class="scene-title" aria-label="Título de la escena secundaria">
+            </div>
+            <article id="splitEditor" class="editor split-editor" contenteditable="true" role="textbox" aria-label="Texto de la escena secundaria" aria-multiline="true" spellcheck="true"></article>
+          </section>
+        </div>
+      </div>
+
+      <div id="cardsView" class="view">
+        <div class="view-header">
+          <div><h1>Vista de tarjetas</h1><p>Reordena escenas, revisa el ritmo y abre cualquier fragmento del manuscrito.</p></div>
+          <div class="view-actions"><button type="button" class="ghost" data-action="add-chapter">Añadir capítulo</button><button type="button" class="primary" data-action="add-scene">Añadir escena</button></div>
+        </div>
+        <div id="cardsBoard" class="cards-board" aria-label="Tablero de capítulos y escenas"></div>
+      </div>
+
+      <div id="timelineView" class="view">
+        <div class="view-header">
+          <div><h1>Cronología</h1><p>Orden temporal de las escenas, huecos de fecha y posibles coincidencias.</p></div>
+          <button type="button" class="primary" data-action="refresh-timeline">Actualizar</button>
+        </div>
+        <div id="timelineSummary" class="timeline-summary"></div>
+        <div id="timelineList" class="timeline-list"></div>
+      </div>
+
+      <div id="cluesView" class="view">
+        <div class="view-header">
+          <div><h1>Sistema de pistas</h1><p>Controla si cada pista está sembrada, reforzada, revelada y resuelta.</p></div>
+          <button type="button" class="primary" data-action="add-clue">Añadir pista</button>
+        </div>
+        <div id="clueHealth" class="planning-health"></div>
+        <div id="cluesList" class="planning-list"></div>
+      </div>
+
+      <div id="continuityView" class="view">
+        <div class="view-header">
+          <div><h1>Continuidad avanzada</h1><p>Registra hechos de personajes, objetos, heridas, ubicaciones y conocimiento.</p></div>
+          <button type="button" class="primary" data-action="add-continuity">Añadir hecho</button>
+        </div>
+        <div id="continuityHealth" class="planning-health"></div>
+        <div id="continuityList" class="planning-list"></div>
+      </div>
+
+      <div id="commentsView" class="view">
+        <div class="view-header">
+          <div><h1>Comentarios</h1><p>Anotaciones de revisión vinculadas a escenas y fragmentos del texto.</p></div>
+          <button type="button" class="primary" data-action="add-comment">Añadir comentario</button>
+        </div>
+        <div id="commentsFilters" class="comment-filters"></div>
+        <div id="commentsList" class="planning-list"></div>
+      </div>
+
+      <div id="bibleView" class="view">
+        <div class="view-header">
+          <div>
+            <h1>Biblia de la novela</h1>
+            <p>Personajes, lugares, objetos, reglas del mundo, pistas y documentación.</p>
+          </div>
+          <button type="button" class="primary" data-action="add-bible-entry">Añadir ficha</button>
+        </div>
+        <div class="bible-layout">
+          <div class="bible-list" id="bibleList"></div>
+          <div class="bible-editor empty" id="bibleEditor">Selecciona o crea una ficha.</div>
+        </div>
+      </div>
+
+      <div id="analysisView" class="view">
+        <div class="view-header">
+          <div>
+            <h1>Análisis del manuscrito</h1>
+            <p>Estadísticas y señales de revisión. Son orientativas, no reglas absolutas.</p>
+          </div>
+          <button type="button" class="primary" data-action="refresh-analysis">Actualizar</button>
+        </div>
+        <div id="analysisCards" class="analysis-grid"></div>
+        <div class="analysis-section">
+          <h2>Repeticiones frecuentes</h2>
+          <div id="repetitionTable" class="table-wrap"></div>
+        </div>
+        <div class="analysis-section">
+          <h2>Salud del proyecto</h2>
+          <ul id="healthList" class="health-list"></ul>
+        </div>
+      </div>
+
+      <div id="trashView" class="view">
+        <div class="view-header">
+          <div>
+            <h1>Papelera</h1>
+            <p>Capítulos, escenas y fichas eliminados. Puedes recuperarlos o borrarlos definitivamente.</p>
+          </div>
+          <button type="button" class="danger" data-action="empty-trash">Vaciar papelera</button>
+        </div>
+        <div id="trashList" class="trash-list"></div>
+      </div>
+    </section>
+
+    <aside class="inspector panel" aria-label="Datos de la escena" id="inspectorPanel">
+      <div class="section-heading">
+        <h2>Inspector</h2>
+        <button type="button" class="icon-button compact" data-action="toggle-inspector" title="Ocultar inspector" aria-label="Ocultar inspector">›</button>
+      </div>
+
+      <div class="form-grid">
+        <label>POV<input id="metaPov" type="text" placeholder="Personaje"></label>
+        <label>Estado<select id="metaStatus">
+          <option>Idea</option><option>Borrador</option><option>Escrito</option><option>Revisión estructural</option><option>Revisión de estilo</option><option>Corrección</option><option>Final</option><option>Bloqueado</option>
+        </select></label>
+        <label>Lugar<input id="metaPlace" type="text"></label>
+        <label>Fecha<input id="metaDate" type="date"></label>
+        <label>Hora<input id="metaTime" type="time"></label>
+        <label>Acto<select id="metaAct"><option value="">Sin definir</option><option>Acto I</option><option>Acto II</option><option>Acto III</option></select></label>
+        <label>Tensión<input id="metaTension" type="range" min="1" max="5" value="3"><span id="metaTensionValue" class="range-value">3/5</span></label>
+        <label class="full">Resumen para tarjeta<textarea id="metaSummary" rows="2" placeholder="Qué ocurre y qué cambia en esta escena"></textarea></label>
+        <label class="full">Personajes presentes<input id="metaParticipants" type="text" placeholder="Mara, Elías, inspector Roca"></label>
+        <label class="full">Conocimiento adquirido<textarea id="metaKnowledge" rows="2" placeholder="Información que descubre o conoce cada personaje"></textarea></label>
+        <label class="full">Objetos, heridas o estado<textarea id="metaInventory" rows="2" placeholder="Llave roja, herida en la mano, abrigo mojado…"></textarea></label>
+        <label class="full">Objetivo<textarea id="metaGoal" rows="2"></textarea></label>
+        <label class="full">Conflicto<textarea id="metaConflict" rows="2"></textarea></label>
+        <label class="full">Resultado<textarea id="metaOutcome" rows="2"></textarea></label>
+        <label class="full">Notas privadas<textarea id="metaNotes" rows="4"></textarea></label>
+      </div>
+
+      <div class="scene-stats">
+        <div><strong id="sceneWords">0</strong><span>palabras</span></div>
+        <div><strong id="sceneChars">0</strong><span>caracteres</span></div>
+        <div><strong id="readTime">0 min</strong><span>lectura</span></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="statusbar">
+    <span id="storageStatus">Local y privado · Guardado seguro en el dispositivo</span>
+    <span id="folderStatus" title="Estado de la carpeta vinculada">Carpeta: no vinculada</span>
+    <span id="currentPath">Capítulo 1 / Escena 1</span>
+    <span id="sessionWords">Sesión: +0 palabras</span>
+  </footer>
+
+  <dialog id="genericDialog" class="dialog" aria-labelledby="dialogTitle">
+    <form method="dialog" id="dialogForm">
+      <div class="dialog-header">
+        <h2 id="dialogTitle">Ventana</h2>
+        <button type="button" class="icon-button" data-action="close-dialog" aria-label="Cerrar">×</button>
+      </div>
+      <div id="dialogBody" class="dialog-body"></div>
+      <div id="dialogActions" class="dialog-actions"></div>
+    </form>
+  </dialog>
+
+  <button type="button" id="panelBackdrop" class="panel-backdrop" data-action="close-panels" aria-label="Cerrar panel abierto" tabindex="-1"></button>
+  <input id="fileInput" type="file" hidden multiple accept=".txt,.md,.markdown,.docx,.epub,.json,.novel404" aria-label="Seleccionar archivos para importar">
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+
+  <script src="app.js?v=1.4.0" defer></script>
+</body>
+</html>

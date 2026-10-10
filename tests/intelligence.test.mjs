@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {analyzeFacts,verifyFactBackup,remapFacts} from '../src/intelligence.js';
+const f=(id,value,scope='1800',sceneId='s1',evidence='')=>({id,projectId:'p1',subject:'Bruna',attribute:'edad',value,scope,sceneId,evidence});
+const scene={id:'s1',projectId:'p1',title:'Capítulo',content:'Bruna tenía nueve años.'};
+test('valores diferentes en igual contexto generan conflicto con evidencia',()=>{const r=analyzeFacts([f('a','9 años','1800','s1','Bruna tenía nueve años.'),f('b','12 años','1800','s1')],[scene]);assert.equal(r.filter(x=>x.type==='conflict').length,1);assert.equal(r[0].evidence[0].quote,'Bruna tenía nueve años.')});
+test('cambio de contexto explícito no se presenta como contradicción',()=>assert.equal(analyzeFacts([f('a','9','1800'),f('b','12','1803')],[scene]).length,0));
+test('contexto ausente produce revisión no certeza',()=>assert.equal(analyzeFacts([f('a','9',''),f('b','12','1803')],[scene])[0].severity,'review'));
+test('sinónimos ortográficos simples normalizados',()=>assert.equal(analyzeFacts([f('a','Nueve años'),f('b','  NUEVE   AÑOS ')],[scene]).length,0));
+test('evidencia inexistente se señala',()=>assert.equal(analyzeFacts([f('a','9','1800','s1','No está en el libro')],[scene])[0].type,'evidence'));
+test('copias con huérfanos se rechazan y copias anteriores se admiten',()=>{const data={projects:[{id:'p1'}],scenes:[scene]};assert.equal(verifyFactBackup(data),true);assert.throws(()=>verifyFactBackup({...data,facts:[f('a','9','1800','s-does-not-exist')]}),/huérfano/)});
+test('reimportación remapea novelas, escenas y hechos',()=>{const source={projects:[{id:'p1'}],scenes:[scene],facts:[f('a','9')]};const copy={projects:[{id:'newp'}],scenes:[{id:'news'}]};remapFacts(source,copy);assert.equal(copy.facts[0].projectId,'newp');assert.equal(copy.facts[0].sceneId,'news');assert.notEqual(copy.facts[0].id,'a')});

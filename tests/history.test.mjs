@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {remapHistory,upgradeSnapshot,renamedSnapshot,remapLore} from '../src/model.js';
+import {randomUUID} from 'node:crypto';
+globalThis.crypto ??= {randomUUID};
+const base={app:'STORYVERSE-404',version:1,projects:[{id:'p',title:'Libro'}],chapters:[{id:'c',projectId:'p',title:'Capítulo',content:'Actual'}],scenes:[{id:'s',projectId:'p',chapterId:'c',title:'Escena',content:'Actual escena'}],history:[{id:'h1',projectId:'p',entityType:'chapters',entityId:'c',title:'Capítulo',content:'Anterior',createdAt:'2026-01-01T00:00:00.000Z'},{id:'h2',projectId:'p',entityType:'scenes',entityId:'s',title:'Escena',content:'Escena anterior',createdAt:'2026-01-02T00:00:00.000Z'}]};
+const source=upgradeSnapshot(base);const copy=renamedSnapshot(source,new Set());remapLore(source,copy);remapHistory(source,copy);upgradeSnapshot(copy);
+assert.equal(copy.history.length,2);assert.equal(copy.history[0].entityId,copy.chapters[0].id);assert.equal(copy.history[1].entityId,copy.scenes[0].id);assert.equal(copy.history[0].projectId,copy.projects[0].id);assert.notEqual(copy.history[0].id,'h1');
+assert.equal(upgradeSnapshot({...base,history:undefined}).history.length,0);
+assert.throws(()=>upgradeSnapshot({...base,history:[{...base.history[0],entityId:'unknown'}]}),/Revisión inválida/);
+assert.throws(()=>upgradeSnapshot({...base,history:[base.history[0],base.history[0]]}),/Revisión inválida/);
+console.log('OK: importación de revisiones antiguas y actuales, validación de historial, remapeo de entidades');
