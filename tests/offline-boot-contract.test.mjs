@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const boot=readFileSync(new URL('../src/bootstrap.js',import.meta.url),'utf8');
+const sw=readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
+const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+assert.match(boot,/import\('\.\/app\.js'\)/,'Boot imports stable module path (without query strings)');
+assert.doesNotMatch(boot,/app\.js\?v=/,'Query string must not break offline cache keys');
+assert.match(sw,/['"]\.\/src\/app\.js['"]/,'App module included in offline precache');
+assert.match(sw,/['"]\.\/src\/bootstrap\.js['"]/,'Bootstrap included in offline precache');
+assert.match(html,/src="\.\/startup-check\.js"/,'Startup diagnostics available');
+assert.match(html,/src="\.\/src\/bootstrap\.js"/,'Bootstrap relative path');
+console.log('PASS: rutas de arranque y caché offline coherentes');

@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {analyzeFacts,numericAge,scopeYear} from '../src/intelligence.js';
+const fact=(id,value,scope,attribute='Edad')=>({id,projectId:'p',sceneId:'',subject:'Bruna',attribute,value,scope,evidence:''});
+test('interpreta solo años explícitos',()=>{assert.equal(scopeYear('Año 1800'),1800);assert.equal(scopeYear('1800'),1800);assert.equal(scopeYear('invierno de 1800'),null)});
+test('normaliza representación numérica de edades',()=>{assert.equal(numericAge('9 años'),9);assert.equal(analyzeFacts([fact('a','9 años','1800'),fact('b','9','1800')]).length,0)});
+test('admite progresión de edad coherente',()=>assert.equal(analyzeFacts([fact('a','9','1800'),fact('b','12 años','1803')]).length,0));
+test('advierte edad que retrocede en tres años',()=>{const r=analyzeFacts([fact('a','12','1800'),fact('b','9','1803')]);assert.equal(r[0].type,'conflict');assert.equal(r[0].severity,'review')});
+test('no trata diferencias durante mismo año como certeza',()=>{const r=analyzeFacts([fact('a','9','1800'),fact('b','10','Año 1800')]);assert.equal(r[0].severity,'review')});
+test('normaliza estado vital sin falsos positivos',()=>assert.equal(analyzeFacts([fact('a','viva','1800','Estado vital'),fact('b','vivo/a','1800','Estado vital')]).length,0));
+test('distingue contextos explícitos no comparables',()=>assert.equal(analyzeFacts([fact('a','Madrid','1800','Residencia'),fact('b','Barcelona','1802','Residencia')]).length,0));

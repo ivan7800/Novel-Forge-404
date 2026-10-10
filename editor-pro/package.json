@@ -1,0 +1,10 @@
+{
+  "name": "novel-forge-404",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Estudio narrativo local y PWA para escritores en español.",
+  "scripts": {
+    "test": "node --check app.js && node --check sw.js",
+    "verify": "node --check app.js && node --check sw.js && node --check app.js && node --check sw.js"
+  }
+}

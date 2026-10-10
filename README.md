@@ -1,56 +1,22 @@
-# Novel Forge 404 v1.4.0 Stable
+# Novel Forge 404 — Edición unificada (GitHub RC)
 
-Editor y estudio narrativo local para escribir, organizar, revisar y exportar novelas en español. Esta versión estable parte del núcleo probado de la v1.3 y evita la reescritura modular experimental de la rama v2.
+Estudio local de novelas con **Editor profesional** (`editor-pro/`) e **Inteligencia narrativa** (inicio). Incluye formato enriquecido y exportación editorial, fichas, cronología, mapa, detección de posibles contradicciones y una transferencia **unidireccional mediante copia**.
 
-## Funciones principales
+## Ejecutar
+- Windows: extrae completamente los archivos y ejecuta `INICIAR_NOVEL_FORGE.bat` (requiere Python 3).
+- En local: `python -m http.server 8765`, luego abre `http://127.0.0.1:8765/`.
+- GitHub Pages: publica **el contenido** de esta carpeta en la raíz del repositorio `Novel-Forge-404`. Las rutas son relativas para `https://usuario.github.io/Novel-Forge-404/`.
+- Entra en **Editor profesional** y escribe/importa. Para analizar una obra, vuelve al inicio y pulsa **Transferir novela**.
 
-- Proyectos, capítulos y escenas.
-- Pegado e importación de TXT, Markdown, DOCX, EPUB y copias `.novel404`.
-- Tipografía española: raya, comillas latinas, puntos suspensivos y normalización.
-- Tarjetas, cronología, pistas, continuidad, comentarios y biblia narrativa.
-- Editor dividido, instantáneas, autocopias y papelera.
-- Exportación TXT, Markdown, HTML, DOCX, EPUB, ZIP, JSON y `.novel404`.
-- PWA local, sin cuentas, backend, telemetría ni dependencias externas.
+## Protección de datos y límites
+- **Cada espacio usa su propia IndexedDB**. Transferir crea una copia en texto plano en inteligencia narrativa; **NO sincroniza** cambios posteriores ni conserva el formato enriquecido en la copia. Los originales del editor profesional no se modifican.
+- **Haz respaldos por separado** de ambos espacios; una transferencia no es una copia de seguridad fiable.
+- La papelera del espacio de inteligencia narrativa no entra en su JSON de respaldo: restaura los elementos antes de exportar.
+- **El almacenamiento depende del origen**: `localhost`, `127.0.0.1` y GitHub Pages guardan información diferente. Para migrar una instalación existente en GitHub Pages, exporta el respaldo del editor antiguo e impórtalo en el nuevo.
+- No borres el repositorio antiguo ni los datos del navegador antes de comprobar la restauración de tus respaldos.
+- IA local opcional: solamente al solicitar expresamente el análisis de una escena se envía contenido al servidor local elegido.
 
-## Uso local
+## Estado de calidad
+Pruebas de lógica: **50/50 superadas** en la preparación de esta entrega; sintaxis JS correcta. Se corrigió una interferencia de cachés entre las dos PWA y el arranque del lector de la base editorial cuando está ausente. La navegación mediante clic, funcionamiento offline y migración real en Windows/GitHub Pages **siguen pendientes de ejecución**, por lo que la etiqueta es **GitHub RC**, no STABLE.
 
-La forma más simple es abrir `index.html`. Para probar instalación PWA y modo offline, usa un servidor local:
-
-### Windows
-
-Ejecuta `INICIAR_LOCAL.bat`.
-
-### Linux o macOS
-
-```bash
-chmod +x INICIAR_LOCAL.sh
-./INICIAR_LOCAL.sh
-```
-
-También puedes usar:
-
-```bash
-python -m http.server 8080
-```
-
-Y abrir `http://127.0.0.1:8080/`.
-
-## Verificación técnica
-
-La aplicación no necesita Node.js para funcionar. Si tienes Node.js instalado:
-
-```bash
-npm run verify
-```
-
-## GitHub Pages
-
-1. Sube el contenido de esta carpeta a la raíz del repositorio.
-2. Comprueba que `index.html` y `.nojekyll` están en la raíz.
-3. En **Settings → Pages**, selecciona **Deploy from a branch**.
-4. Selecciona `main` y `/(root)`.
-5. Abre la URL HTTPS y recarga una vez para actualizar el service worker.
-
-## Seguridad de los manuscritos
-
-Los proyectos se guardan en IndexedDB con respaldo local cuando es posible. Exporta periódicamente una copia `.novel404`; el almacenamiento del navegador no sustituye una copia externa.
+Ver [`QA-GITHUB.md`](QA-GITHUB.md) y [`tests/`](tests/). **No se ha publicado nada automáticamente.**
